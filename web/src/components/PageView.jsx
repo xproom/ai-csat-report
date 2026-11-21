@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderPdfPage } from '@/lib/pdfRender'
 
-export default function PageView({ files, pageRef, placeholder }) {
+export default function PageView({ files, pageRef, placeholder, onPageCount }) {
   const wrapRef = useRef(null)
   const canvasRef = useRef(null)
   const [width, setWidth] = useState(0)
@@ -33,10 +33,14 @@ export default function PageView({ files, pageRef, placeholder }) {
     if (!isPdf || !width || !canvasRef.current) return undefined
     let cancelled = false
     renderPdfPage(file, pageNumber, canvasRef.current, width)
-      .then(info => { if (!cancelled) setStatus(`${info.page} / ${info.pageCount}쪽`) })
+      .then(info => {
+        if (cancelled) return
+        setStatus(`${info.page} / ${info.pageCount}쪽`)
+        onPageCount?.(fileIndex, info.pageCount)
+      })
       .catch(() => { if (!cancelled) setStatus('PDF를 표시하지 못했습니다') })
     return () => { cancelled = true }
-  }, [file, isPdf, pageNumber, width])
+  }, [file, isPdf, pageNumber, width, fileIndex, onPageCount])
 
   return (
     <div ref={wrapRef} className="relative w-full">

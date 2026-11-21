@@ -10,7 +10,7 @@
  * - 다시 보기: 저장된 풀이를 실제 속도(또는 배속)로 재생. 실시간 기록이 없는 풀이는 추정 시간으로 재생
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CLAUDE_MODELS, EFFORT_LEVELS } from '@/lib/aiRunner'
 import { db } from '@/lib/db'
 import { gradeRun } from '@/lib/grading'
@@ -26,11 +26,17 @@ import PageView from './PageView'
 const SPEEDS = [1, 2, 4, 8, 16]
 const CIRCLED = ['①', '②', '③', '④', '⑤']
 
-/** @brief 페이지 정보가 없을 때 문항 순서로 파일을 짐작 (사진 여러 장 업로드용) */
-function guessPage(paper, files, no) {
-  if (files.length <= 1) return { file: 0, page: 1 }
-  const index = paper.questions.findIndex(question => question.no === no)
-  return { file: Math.min(files.length - 1, Math.floor((Math.max(0, index) / paper.questions.length) * files.length)), page: 1 }
+/**
+ * @brief 위치 정보가 없을 때 문항 순서로 쪽을 짐작해 답안지와 문제 화면을 맞춤
+ * - 사진 여러 장: 문항 순서에 비례해 몇 번째 사진인지
+ * - PDF 한 개: 문항 순서에 비례해 몇 쪽인지 (쪽 수는 화면에 그려 본 뒤 알게 됨)
+ */
+function guessPage(paper, files, no, pageCounts) {
+  const index = Math.max(0, paper.questions.findIndex(question => question.no === no))
+  const ratio = index / Math.max(1, paper.questions.length)
+  if (files.length > 1) return { file: Math.min(files.length - 1, Math.floor(ratio * files.length)), page: 1 }
+  const count = pageCounts[0] ?? 1
+  return { file: 0, page: Math.min(count, 1 + Math.floor(ratio * count)) }
 }
 
 export default function SolveViewer({ paper, runs, files, initialRunId }) {
@@ -51,6 +57,11 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   const [live, setLive] = useState(null) // { events, answers, error, status, pageMap }
   // OMR에서 누른 문항 (실시간 풀이 중에 지난 문항을 다시 볼 때)
   const [focusNo, setFocusNo] = useState(null)
+  // 파일별 PDF 쪽 수 (위치 정보가 없을 때 쪽을 짐작하는 데 씀)
+  const [pageCounts, setPageCounts] = useState({})
+  const reportPageCount = useCallback((fileIndex, count) => {
+    setPageCounts(prev => (prev[fileIndex] === count ? prev : { ...prev, [fileIndex]: count }))
+  }, [])
   const liveRef = useRef({ lastT: 0, lastAt: 0, controller: null })
   const apiKey = getApiKey()
   const isLive = Boolean(live && !live.finished)
@@ -183,7 +194,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   }
 
   const currentQuestion = paper.questions.find(question => question.no === display?.currentNo)
-  const pageRef = display?.page ?? (display?.currentNo != null ? guessPage(paper, files, display.currentNo) : { file: 0, page: 1 })
+  const pageRef = display?.page ?? (display?.currentNo != null ? guessPage(paper, files, display.currentNo, pageCounts) : { file: 0, page: 1 })
   const solved = live ? new Set(live.events.filter(event => event.kind === 'end').map(event => event.no)).size : view?.solvedCount ?? 0
 
   return (
@@ -322,6 +333,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
                   <PageView
                     files={files}
                     pageRef={pageRef}
+                    onPageCount={reportPageCount}
                     placeholder={(
                       <div className="flex min-h-[22rem] flex-col items-center justify-center gap-2 bg-[#fbfaf6] px-6 py-10 text-center">
                         <div className="text-xs font-bold text-[var(--color-ink-soft)]">{paperTitle(paper)}</div>

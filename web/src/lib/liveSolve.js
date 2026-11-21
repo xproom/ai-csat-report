@@ -23,13 +23,20 @@ import { CLAUDE_MODELS, MAX_REQUEST_BYTES, describeApiError, estimateRequestByte
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const MAX_THINK_CHARS = 700
 
-export const LIVE_SYSTEM_PROMPT = `당신은 한국 학교 시험을 치르는 학생입니다. 첨부된 문제지에서 지정된 번호의 한 문항만 풉니다.
-반드시 아래 형식의 줄로만 출력하고, 다른 말은 쓰지 마세요.
+// 모델의 내부 추론을 밖으로 꺼내 달라는 요청으로 보이지 않도록, "생각"이 아니라 시험지 여백에 적는 풀이 요약을 요청함
+// (Claude는 추론 과정 추출로 판단되는 요청을 거절할 수 있음)
+export const LIVE_SYSTEM_PROMPT = `당신은 한국 학교 시험을 보는 학생입니다. 첨부된 문제지에서 지정된 번호의 한 문항을 풀고,
+시험지 여백에 적듯이 풀이를 짧게 정리한 뒤 답을 냅니다. 아래 형식의 줄로만 출력하세요.
 PAGE: 그 문항이 있는 첨부 파일 번호-쪽 번호 (예: 첫 번째 파일 2쪽이면 1-2)
-STEP: 지금 하는 생각을 한국어 한 문장으로 짧게
-WORK: 식이나 계산 한 줄 (LaTeX 없이 일반 문자로, 예: a7 = 1 × 3^3 = 27)
-(STEP과 WORK는 풀이 순서대로 섞어서 2~8줄)
+STEP: 풀이 과정을 한 문장으로 요약 (예: 둘째 문단에서 글쓴이의 주장을 찾는다.)
+WORK: 근거가 되는 내용이나 식 한 줄 (LaTeX 없이 일반 문자로)
+(STEP과 WORK는 풀이 순서대로 2~6줄)
 ANSWER: 최종 답 한 줄 — 객관식은 선지 번호 숫자 하나, 단답형은 답만, 서술형은 핵심 답을 한두 문장으로`
+
+/** 자세한 풀이가 거절될 때 쓰는 답만 받는 지시문 (결과 탭의 한 번에 풀기와 같은 성격) */
+export const ANSWER_ONLY_PROMPT = `당신은 한국 학교 시험을 보는 학생입니다. 첨부된 문제지에서 지정된 번호의 문항을 풀고 최종 답만 제출합니다.
+다른 말 없이 다음 한 줄만 출력하세요.
+ANSWER: 최종 답 — 객관식은 선지 번호 숫자 하나, 단답형은 답만, 서술형은 핵심 답을 한두 문장으로`
 
 /** @brief 스트리밍 텍스트를 줄 단위로 끊어 전달 */
 export function createLineParser(onLine) {
@@ -229,13 +236,11 @@ function createThinkCollector(emit) {
  * @brief 한 문항 실시간 풀이
  * @returns {Promise<{ answer, status, page, durationMs, inputTokens, outputTokens, cacheReadTokens }>}
  */
-async function solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat }) {
+async function solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat, mode = 'detailed' }) {
   const request = {
     model: modelInfo.id,
     max_tokens: 16000,
-    system: LIVE_SYSTEM_PROMPT,
-    // 생각 요약을 자막으로 보여주기 위해 요청 (계정에서 받지 않으면 빼고 다시 시도)
-    thinking: compat.summarized ? { type: 'adaptive', display: 'summarized' } : { type: 'adaptive' },
+    system: mode === 'answerOnly' ? ANSWER_ONLY_PROMPT : LIVE_SYSTEM_PROMPT,
     output_config: { effort },
     messages: [{ role: 'user', content: [...blocks, { type: 'text', text: questionPrompt(paper, question) }] }]
   }
@@ -279,9 +284,8 @@ async function solveOne({ client, modelInfo, effort, blocks, paper, question, si
   lines.flush()
   const message = await stream.finalMessage()
 
-  if (message.stop_reason === 'refusal') {
-    emit('step', '이 문항은 모델이 응답을 거절했습니다.')
-  }
+  const refused = message.stop_reason === 'refusal'
+  const refusalCategory = message.stop_details?.category ?? null
   let answer = cleanFinalAnswer(question, answerText)
   // 형식을 어긴 응답이어도 본문에서 답을 찾아 마킹
   if (!answer) {
@@ -291,6 +295,8 @@ async function solveOne({ client, modelInfo, effort, blocks, paper, question, si
   return {
     answer,
     status: answer ? 'answered' : sawAnswerLine || message.stop_reason === 'max_tokens' ? 'parse_failed' : 'no_answer',
+    refused: refused && !answer,
+    refusalCategory,
     page,
     inputTokens: (message.usage?.input_tokens ?? 0) + (message.usage?.cache_creation_input_tokens ?? 0),
     cacheReadTokens: message.usage?.cache_read_input_tokens ?? 0,
@@ -339,7 +345,11 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
   const errors = {}
   const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
   // 계정에서 받지 않는 선택 기능은 400 오류가 나면 끄고 다시 시도
-  const compat = { fallbacks: modelInfo.fallback, summarized: true }
+  const compat = { fallbacks: modelInfo.fallback }
+  // 자세한 풀이가 연달아 거절되면 남은 문항은 답만 받음
+  let solveMode = 'detailed'
+  let consecutiveRefusals = 0
+  const refusals = {}
   let aborted = false
   let fatalError = ''
   let consecutiveFailures = 0
@@ -356,7 +366,27 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
     if (pageMap[question.no]) emit('page', `${pageMap[question.no].file + 1}-${pageMap[question.no].page}`)
     for (;;) {
       try {
-        const result = await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat })
+        let result = await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat, mode: solveMode })
+        if (result.refused && solveMode === 'detailed') {
+          emit('step', `자세한 풀이 요청이 거절되어(분류: ${result.refusalCategory ?? '알 수 없음'}) 답만 다시 요청합니다.`)
+          consecutiveRefusals += 1
+          if (consecutiveRefusals >= 2) {
+            solveMode = 'answerOnly'
+            emit('step', '거절이 이어져 남은 문항은 답만 받습니다.')
+          }
+          const retry = await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat, mode: 'answerOnly' })
+          retry.inputTokens += result.inputTokens
+          retry.outputTokens += result.outputTokens
+          retry.cacheReadTokens += result.cacheReadTokens
+          result = retry
+        } else if (!result.refused) {
+          consecutiveRefusals = 0
+        }
+        if (result.refused) {
+          refusals[question.no] = result.refusalCategory ?? 'unknown'
+          errors[question.no] = `모델이 이 문항에 답하기를 거절했습니다(분류: ${result.refusalCategory ?? '알 수 없음'}).`
+          emit('step', errors[question.no])
+        }
         answers[question.no] = { answer: result.answer, status: result.status }
         usage.inputTokens += result.inputTokens
         usage.outputTokens += result.outputTokens
@@ -366,9 +396,8 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
       } catch (error) {
         if (signal?.aborted) { aborted = true; break }
         const info = describeApiError(error)
-        if (info.status === 400 && (compat.fallbacks || compat.summarized)) {
-          if (compat.fallbacks) compat.fallbacks = false
-          else compat.summarized = false
+        if (info.status === 400 && compat.fallbacks && !/credit|balance|billing/i.test(info.message)) {
+          compat.fallbacks = false
           emit('step', '일부 선택 기능 없이 다시 요청합니다.')
           continue
         }
@@ -407,6 +436,8 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
     perQuestionMs,
     pageMap,
     locateMs,
+    refusals,
+    solveMode,
     trace,
     errors,
     fatalError,
