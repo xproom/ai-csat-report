@@ -6,10 +6,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import AnswerKeyEditor from '@/components/AnswerKeyEditor'
+import AnswerKeyUpload from '@/components/AnswerKeyUpload'
 import CoverOptionsForm from '@/components/CoverOptionsForm'
 import { FileUploader, PaperViewer } from '@/components/FileUploader'
 import OmrCard, { OmrLegend } from '@/components/OmrCard'
+import OmrSimulator from '@/components/OmrSimulator'
 import PaperCover from '@/components/PaperCover'
+import PerformanceView from '@/components/PerformanceView'
 import RunPanel from '@/components/RunPanel'
 import { db } from '@/lib/db'
 import { formatRate, gradeRun, questionStats } from '@/lib/grading'
@@ -21,8 +24,13 @@ const TABS = [
   ['paper', '문제지'],
   ['key', '정답·배점'],
   ['omr', 'OMR'],
-  ['results', '결과']
+  ['sim', '시뮬레이션'],
+  ['results', '결과'],
+  ['perf', '성능 평가']
 ]
+
+/** @brief 현재 시각(ms) - 이벤트 처리 중에만 호출 */
+const currentTime = () => Date.now()
 
 const SOURCE_LABEL = { ai: 'AI 실행', manual: '직접 입력', import: '가져옴' }
 
@@ -67,7 +75,7 @@ export default function PaperPage({ paperId, tab, runId, edit }) {
     )
   }
 
-  const setTab = next => navigate(`/paper/${paperId}?tab=${next}${runId && next === 'omr' ? `&run=${runId}` : ''}`)
+  const setTab = next => navigate(`/paper/${paperId}?tab=${next}${runId && (next === 'omr' || next === 'sim') ? `&run=${runId}` : ''}`)
 
   const addFiles = async list => {
     const records = list.map((file, index) => ({ id: makeId('file'), paperId, name: file.name, type: file.type, size: file.size, blob: file, order: files.length + index }))
@@ -153,15 +161,22 @@ export default function PaperPage({ paperId, tab, runId, edit }) {
       )}
 
       {tab === 'key' && (
-        <div className="card p-4 sm:p-6">
-          <h2 className="text-lg font-extrabold mb-4">문항 구성과 정답</h2>
-          <AnswerKeyEditor paper={paper} onChange={setPaper} />
+        <div className="space-y-6">
+          <AnswerKeyUpload paper={paper} onApply={next => { setPaper(next); notify('실제 정답을 반영했습니다. 모든 풀이가 새 정답으로 다시 채점됩니다.') }} />
+          <div className="card p-4 sm:p-6">
+            <h2 className="text-lg font-extrabold mb-4">문항 구성과 정답</h2>
+            <AnswerKeyEditor key={paper.answerKeySource?.appliedAt ?? 'manual'} paper={paper} onChange={setPaper} />
+          </div>
         </div>
       )}
 
       {tab === 'omr' && <OmrTab key={runId || 'answer-key'} paper={paper} runs={runs} runId={runId} edit={edit} />}
 
+      {tab === 'sim' && <OmrSimulator key={paper.id} paper={paper} runs={runs} initialRunId={runId} />}
+
       {tab === 'results' && <ResultsTab paper={paper} runs={runs} files={files} />}
+
+      {tab === 'perf' && <PerformanceView paper={paper} runs={runs} />}
     </div>
   )
 }
@@ -185,9 +200,17 @@ function OmrTab({ paper, runs, runId, edit }) {
 
   const choose = id => navigate(`/paper/${paper.id}?tab=omr${id ? `&run=${id}` : ''}`)
 
+  // 직접 입력: 첫 마킹부터 마지막 마킹까지의 시간을 수행 시간으로 기록 (성능 평가에 사용)
   const saveAnswer = (no, answer) => {
     const base = draftRef.current
-    return persist({ ...base, answers: { ...base.answers, [no]: { answer, status: answer.trim() ? 'answered' : 'no_answer' } } })
+    const now = currentTime()
+    const startedAt = base.timing?.startedAt ?? now
+    return persist({
+      ...base,
+      answers: { ...base.answers, [no]: { answer, status: answer.trim() ? 'answered' : 'no_answer' } },
+      timing: { startedAt },
+      durationMs: now - startedAt
+    })
   }
 
   const saveEssayScore = (no, value) => {
@@ -232,7 +255,7 @@ function OmrTab({ paper, runs, runId, edit }) {
       </div>
 
       {editable && (
-        <p className="rounded-lg bg-[var(--color-brand-soft)] px-3 py-2 text-sm">버블을 눌러 마킹하세요. 다시 누르면 지워집니다. 누를 때마다 자동 저장됩니다.</p>
+        <p className="rounded-lg bg-[var(--color-brand-soft)] px-3 py-2 text-sm">버블을 눌러 마킹하세요. 다시 누르면 지워집니다. 누를 때마다 자동 저장되고, 첫 마킹부터 마지막 마킹까지의 시간이 수행 시간으로 기록됩니다{draft?.durationMs ? ` (지금까지 ${Math.round(draft.durationMs / 1000)}초)` : ''}.</p>
       )}
 
       <OmrCard paper={paper} run={draft} showGrading={showGrading && !editable} editable={editable} onAnswer={saveAnswer} />

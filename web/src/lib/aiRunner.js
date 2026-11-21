@@ -88,37 +88,18 @@ export async function runClaudeOnPaper({ apiKey, model, effort = 'high', paper, 
   if (!files?.length) throw new Error('문제지 파일이 없습니다. 먼저 문제지를 업로드하세요.')
 
   const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
   const blocks = await Promise.all(files.map(fileToBlock))
-  const started = performance.now()
-
-  const request = {
-    model: modelInfo.id,
-    max_tokens: 16000,
+  const { response, text, durationMs } = await callClaude({
+    apiKey,
+    modelInfo,
+    effort,
     system: SYSTEM_PROMPT,
-    output_config: { effort, format: { type: 'json_schema', schema: ANSWER_SCHEMA } },
-    messages: [{
-      role: 'user',
-      content: [
-        ...blocks,
-        { type: 'text', text: `문항 구성:\n${describeQuestions(paper)}\n\n위 ${paper.questions.length}개 문항의 답을 모두 제출하세요.` }
-      ]
-    }]
-  }
-
-  // 안전 분류기가 거절하면 같은 요청을 다른 모델로 이어서 처리 (지원 모델만)
-  const response = modelInfo.fallback
-    ? await client.beta.messages.create(
-      { ...request, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' },
-      { signal }
-    )
-    : await client.messages.create(request, { signal })
-
-  if (response.stop_reason === 'refusal') {
-    throw new Error(`모델이 응답을 거절했습니다${response.stop_details?.category ? ` (${response.stop_details.category})` : ''}.`)
-  }
-
-  const text = response.content.filter(block => block.type === 'text').map(block => block.text).join('')
+    content: [
+      ...blocks,
+      { type: 'text', text: `문항 구성:\n${describeQuestions(paper)}\n\n위 ${paper.questions.length}개 문항의 답을 모두 제출하세요.` }
+    ],
+    signal
+  })
   const answers = parseAnswers(text, paper)
   if (response.stop_reason === 'max_tokens') {
     for (const entry of Object.values(answers)) {
@@ -141,9 +122,65 @@ export async function runClaudeOnPaper({ apiKey, model, effort = 'high', paper, 
       inputTokens: response.usage?.input_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0
     },
-    durationMs: Math.round(performance.now() - started),
+    durationMs,
     note: response.stop_reason === 'max_tokens' ? '출력 한도에 걸려 일부 답이 잘렸을 수 있습니다.' : ''
   }
+}
+
+/**
+ * @brief Claude 요청 공통 처리 (구조화 출력, 거절 시 서버 측 대체 모델, 거절 응답 오류 처리)
+ * @returns {Promise<{ response, text: string, durationMs: number }>} durationMs는 요청 시작부터 응답까지의 실제 시간
+ */
+async function callClaude({ apiKey, modelInfo, effort, system, content, signal }) {
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
+  const started = performance.now()
+  const request = {
+    model: modelInfo.id,
+    max_tokens: 16000,
+    system,
+    output_config: { effort, format: { type: 'json_schema', schema: ANSWER_SCHEMA } },
+    messages: [{ role: 'user', content }]
+  }
+
+  // 안전 분류기가 거절하면 같은 요청을 다른 모델로 이어서 처리 (지원 모델만)
+  const response = modelInfo.fallback
+    ? await client.beta.messages.create(
+      { ...request, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' },
+      { signal }
+    )
+    : await client.messages.create(request, { signal })
+
+  if (response.stop_reason === 'refusal') {
+    throw new Error(`모델이 응답을 거절했습니다${response.stop_details?.category ? ` (${response.stop_details.category})` : ''}.`)
+  }
+
+  const text = response.content.filter(block => block.type === 'text').map(block => block.text).join('')
+  return { response, text, durationMs: Math.round(performance.now() - started) }
+}
+
+const KEY_READER_PROMPT = `첨부한 자료는 학교 시험의 정답표(답안지)입니다. 문제를 풀지 말고, 정답표에 적힌 각 문항 번호의 정답을 그대로 옮겨 적으세요.
+- 객관식은 선지 번호를 숫자 하나로 쓴다 (예: ③ → "3").
+- 단답형은 적힌 답을 그대로 쓴다. 정답이 여러 개면 "|"로 구분한다.
+- 서술형 모범답안은 핵심만 한두 문장으로 쓴다.
+- 정답표에 없는 번호는 넣지 않는다.`
+
+/**
+ * @brief 정답표 PDF·사진에서 Claude로 정답 읽기
+ * @returns {Promise<string>} answerKey.parseAnswerKey에 넣을 JSON 텍스트
+ */
+export async function readAnswerKeyWithClaude({ apiKey, model = CLAUDE_MODELS[0].id, paper, file, signal }) {
+  if (!apiKey) throw new Error('정답표 사진·PDF를 읽으려면 설정에서 Anthropic API 키를 입력하세요.')
+  const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
+  const block = await fileToBlock(file)
+  const { text } = await callClaude({
+    apiKey,
+    modelInfo,
+    effort: 'low',
+    system: KEY_READER_PROMPT,
+    content: [block, { type: 'text', text: `이 시험은 ${paper.questions.length}문항입니다.\n${describeQuestions(paper)}` }],
+    signal
+  })
+  return text
 }
 
 /**
@@ -203,7 +240,8 @@ export function importRuns(json, paper) {
       answers,
       essayScores: item.essayScores || {},
       usage: item.usage || {},
-      durationMs: item.durationMs || 0,
+      // 수행 시간: durationMs(밀리초) 또는 seconds(초)
+      durationMs: Number(item.durationMs) || (Number(item.seconds) > 0 ? Math.round(Number(item.seconds) * 1000) : 0),
       note: item.note || ''
     }
   })

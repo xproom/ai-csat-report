@@ -17,9 +17,10 @@ function seeded(seed) {
 }
 
 const DEMO_MODELS = [
-  { name: '예시 모델 A', skill: 0.93 },
-  { name: '예시 모델 B', skill: 0.8 },
-  { name: '예시 모델 C', skill: 0.62 }
+  // secondsPerQuestion: 가상 수행 시간 (느리고 정확 / 보통 / 빠르고 부정확)
+  { name: '예시 모델 A', skill: 0.93, secondsPerQuestion: 5.2 },
+  { name: '예시 모델 B', skill: 0.8, secondsPerQuestion: 2.4 },
+  { name: '예시 모델 C', skill: 0.62, secondsPerQuestion: 0.9 }
 ]
 
 function demoPaper(meta, counts, seed) {
@@ -65,8 +66,8 @@ function demoRuns(paper, seed) {
       createdAt: new Date().toISOString(),
       answers,
       essayScores,
-      usage: {},
-      durationMs: 0,
+      usage: { inputTokens: 4200 + paper.questions.length * 180, outputTokens: Math.round(paper.questions.length * model.secondsPerQuestion * 55) },
+      durationMs: Math.round(paper.questions.length * model.secondsPerQuestion * (0.85 + random() * 0.3) * 1000),
       note: '둘러보기용 가상 데이터'
     }
   })

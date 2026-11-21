@@ -64,8 +64,12 @@ function Bubble({ digit, filled, isKey, onClick, disabled, label }) {
  * @param {boolean} [props.showGrading]
  * @param {boolean} [props.editable]
  * @param {(no: number, answer: string) => void} [props.onAnswer]
+ * @param {Set<number>|null} [props.visibleNos] - 시뮬레이션용: 지금까지 마킹이 끝난 문항 (null이면 전부)
+ * @param {Set<number>|null} [props.gradedNos] - 시뮬레이션용: 지금까지 채점이 끝난 문항 (null이면 전부)
+ * @param {number|null} [props.activeNo] - 시뮬레이션용: 지금 처리 중인 문항 강조
+ * @param {boolean} [props.showStamp] - 점수 도장 표시
  */
-export default function OmrCard({ paper, run = null, showGrading = true, editable = false, onAnswer }) {
+export default function OmrCard({ paper, run = null, showGrading = true, editable = false, onAnswer, visibleNos = null, gradedNos = null, activeNo = null, showStamp = true }) {
   const isKeySheet = !run
   const result = useMemo(() => (run ? gradeRun(paper, run) : null), [paper, run])
   const itemByNo = useMemo(() => new Map((result?.items || []).map(item => [item.no, item])), [result])
@@ -77,6 +81,7 @@ export default function OmrCard({ paper, run = null, showGrading = true, editabl
 
   const markedOf = question => {
     if (isKeySheet) return String(question.answer ?? '')
+    if (visibleNos && !visibleNos.has(question.no)) return ''
     const entry = run.answers?.[question.no]
     if (!entry || entry.status !== 'answered') return ''
     const match = String(entry.answer).normalize('NFKC').match(/\d+/)
@@ -85,6 +90,7 @@ export default function OmrCard({ paper, run = null, showGrading = true, editabl
 
   const gradeKind = question => {
     if (isKeySheet || !showGrading) return null
+    if (gradedNos && !gradedNos.has(question.no)) return null
     const item = itemByNo.get(question.no)
     if (!item || item.correct === null) return null
     return item.correct ? 'correct' : 'wrong'
@@ -137,7 +143,7 @@ export default function OmrCard({ paper, run = null, showGrading = true, editabl
                       return (
                         <div
                           key={question.no}
-                          className={`grid grid-cols-[2.6rem_1fr] items-center ${rowIndex % 5 === 4 ? 'border-b-[1.5px] border-[var(--color-omr)]' : 'border-b border-[var(--color-omr)]/25'} last:border-b-0`}
+                          className={`grid grid-cols-[2.6rem_1fr] items-center transition-colors ${activeNo === question.no ? 'bg-amber-100/80' : ''} ${rowIndex % 5 === 4 ? 'border-b-[1.5px] border-[var(--color-omr)]' : 'border-b border-[var(--color-omr)]/25'} last:border-b-0`}
                         >
                           <div className="relative h-9 flex items-center justify-center border-r-[1.5px] border-[var(--color-omr)] text-sm font-extrabold text-[var(--color-ink)] tabular-nums">
                             {question.no}
@@ -180,10 +186,12 @@ export default function OmrCard({ paper, run = null, showGrading = true, editabl
                 {writtenQuestions.map(question => {
                   const item = itemByNo.get(question.no)
                   const kind = gradeKind(question)
-                  const text = isKeySheet ? question.answer : run.answers?.[question.no]?.answer ?? ''
+                  const hidden = !isKeySheet && visibleNos && !visibleNos.has(question.no)
+                  const text = isKeySheet ? question.answer : hidden ? '' : run.answers?.[question.no]?.answer ?? ''
+                  const graded = !gradedNos || gradedNos.has(question.no)
                   const isEssay = question.type === 'essay'
                   return (
-                    <div key={question.no} className={`relative grid grid-cols-[2.6rem_1fr] border-[1.5px] border-[var(--color-omr)] rounded-md bg-white/70 ${isEssay ? 'sm:col-span-2' : ''}`}>
+                    <div key={question.no} className={`relative grid grid-cols-[2.6rem_1fr] border-[1.5px] border-[var(--color-omr)] rounded-md transition-colors ${activeNo === question.no ? 'bg-amber-100/80' : 'bg-white/70'} ${isEssay ? 'sm:col-span-2' : ''}`}>
                       <div className="relative flex flex-col items-center justify-center border-r-[1.5px] border-[var(--color-omr)] py-2">
                         <span className="text-sm font-extrabold tabular-nums">{question.no}</span>
                         <span className="text-[0.6rem] font-bold text-[var(--color-omr)]">{isEssay ? '서술' : '단답'}</span>
@@ -196,10 +204,10 @@ export default function OmrCard({ paper, run = null, showGrading = true, editabl
                             : <input className="w-full bg-transparent font-hand text-2xl text-[#1b2a6b] outline-none" value={text} placeholder="답 쓰기" onChange={e => onAnswer?.(question.no, e.target.value)} />
                         ) : (
                           <p className={`font-hand text-[#1b2a6b] whitespace-pre-wrap break-words ${isEssay ? 'text-xl leading-6' : 'text-2xl leading-8'}`}>
-                            {text || <span className="text-[var(--color-ink-soft)]/60 text-lg">{isKeySheet ? '(모범답안 없음)' : '미기재'}</span>}
+                            {text || (hidden ? null : <span className="text-[var(--color-ink-soft)]/60 text-lg">{isKeySheet ? '(모범답안 없음)' : '미기재'}</span>)}
                           </p>
                         )}
-                        {showGrading && !isKeySheet && item && (
+                        {showGrading && !isKeySheet && item && graded && (
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                             {isEssay ? (
                               item.correct === null && item.status === 'answered'
@@ -221,7 +229,7 @@ export default function OmrCard({ paper, run = null, showGrading = true, editabl
       </div>
 
       {/* 점수 도장 */}
-      {result && showGrading && (
+      {result && showGrading && showStamp && (
         <div className="stamp absolute -top-3 right-3 sm:right-6 flex flex-col items-center justify-center w-[5.5rem] h-[5.5rem] sm:w-28 sm:h-28 rounded-full border-[3px] border-[var(--color-pen)] text-[var(--color-pen)] bg-white/85 backdrop-blur-[1px] shadow-sm" style={{ transform: 'rotate(-10deg)' }} aria-label={`점수 ${result.score}점`}>
           <span className="font-hand text-[2.4rem] sm:text-5xl leading-none">{Number.isInteger(result.score) ? result.score : result.score.toFixed(1)}</span>
           <span className="text-[0.62rem] font-bold -mt-0.5">/ {result.maxScore}점</span>
