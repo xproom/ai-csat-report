@@ -1,7 +1,10 @@
 name: Deploy to GitHub Pages
 
 # main에 올라올 때와 수동 실행 시에만 배포합니다.
-# 테스트 통과 후 web/ 앱을 빌드해 web/dist를 GitHub Pages에 올립니다.
+# 1) build: 테스트 통과 후 web/ 앱을 빌드해 web/dist를 Pages 결과물로 올림
+# 2) deploy: build가 끝난 뒤 그 결과물을 배포
+# 한 작업 안에서 올리자마자 배포하면 결과물을 아직 못 찾는 경우가 있어("No artifacts named github-pages")
+# GitHub 공식 예시처럼 두 작업으로 나눔
 on:
   push:
     branches: [main]
@@ -13,7 +16,7 @@ on:
 
 concurrency:
   group: pages-deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -21,11 +24,8 @@ permissions:
   id-token: write
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-24.04
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,17 +33,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
         working-directory: web
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm ci
 
-      - name: Build site
+      - name: Test and build
         working-directory: web
         env:
           # 저장소 이름 경로로 배포 (https://<user>.github.io/<repo>/)
@@ -55,6 +53,13 @@ jobs:
         with:
           path: web/dist
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
