@@ -3,7 +3,7 @@
  * @brief 서비스 워커 - 앱 셸만 캐시하고, 이전 버전 캐시는 정리
  * @note 사용자 데이터는 IndexedDB에 있으므로 여기서 다루지 않습니다.
  */
-const CACHE_NAME = 'exam-bench-v1'
+const CACHE_NAME = 'exam-bench-v2'
 const BASE_PATH = new URL(self.registration.scope).pathname
 
 self.addEventListener('install', (event) => {
