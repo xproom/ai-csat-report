@@ -24,6 +24,7 @@ import { useExportImage, README_EXPORT_WIDTH } from '@/hooks/useExportImage'
 import { useBarChartExportLayout } from '@/hooks/useBarChartExportLayout'
 import { BenchmarkNote, ExportButton, ModelInfoContent, NoWebSearchBadge, TestEnvCaption } from '@/components/common'
 import { formatModelDisplayName, getModelFlags } from '@/utils/modelMeta'
+import { BRAND } from '@/config/brand'
 
 const MAX_LINE_LENGTH = 21
 const MAX_LINES = 3
@@ -789,7 +790,7 @@ export default function ScoreBarChart({
           <TestEnvCaption className="mt-1.5" />
         </div>
         <div className="flex items-start gap-2">
-          <span className="export-role-watermark hidden text-base text-gray-400 mt-8" data-export-show="true">Github/hehee9</span>
+          <span className="export-role-watermark hidden text-base text-gray-400 mt-8" data-export-show="true">{BRAND.watermark}</span>
           <ExportButton
             onClick={() => exportImage(`${subtitle || t('common.all')}.png`)}
             exportKey="overview-score-chart"

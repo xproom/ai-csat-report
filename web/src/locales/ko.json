@@ -1,8 +1,8 @@
 {
   "header": {
-    "title": "2026 수능 LLM 풀이 대시보드",
-    "titleShort": "수능 LLM",
-    "titleSuffix": "LLM 풀이 대시보드",
+    "title": "AI 수능 성적표",
+    "titleShort": "AI 수능",
+    "titleSuffix": "AI 성적표",
     "csatName": "수능",
     "mockExamName": "모의고사",
     "mockEvaluationName": "모의평가",
@@ -24,7 +24,8 @@
     "subjects": "과목별 상세",
     "compare": "모델 비교",
     "cost": "상세 분석",
-    "trend": "성적 변화 추이"
+    "trend": "성적 변화 추이",
+    "grade": "등급 성적표"
   },
   "trend": {
     "title": "출시일별 성적 변화 추이",
@@ -46,8 +47,18 @@
     "unclassifiedModels": "요금제 정보가 없는 모델 {{count}}개는 표시하지 않았습니다."
   },
   "analysis": {
-    "metrics": { "score": "성적", "cost": "비용", "tokens": "토큰", "time": "시간" },
-    "units": { "points": "점", "dollars": "$", "tokens": "토큰", "hours": "시간" },
+    "metrics": {
+      "score": "성적",
+      "cost": "비용",
+      "tokens": "토큰",
+      "time": "시간"
+    },
+    "units": {
+      "points": "점",
+      "dollars": "$",
+      "tokens": "토큰",
+      "hours": "시간"
+    },
     "xAxis": "가로축 지표",
     "yAxis": "세로축 지표",
     "estimatedTime": "예상 풀이 시간",
@@ -87,7 +98,9 @@
       "vendor": "개발사순",
       "costAsc": "비용 낮은 순",
       "efficiencyDesc": "효율 높은 순"
-    }
+    },
+    "examDayOnly": "시험 당일 모델만",
+    "examDayOnlyHelp": "시험일까지 출시된 모델만 표시합니다. 이 모델들은 구조상 시험 문제를 학습할 수 없습니다."
   },
   "charts": {
     "totalScore": "종합 점수",
@@ -350,5 +363,32 @@
     "contact": "문의 메일",
     "lastUpdated": "최종 업데이트",
     "unofficial": "비공식 프로젝트입니다. 한국교육과정평가원과 관련이 없습니다."
+  },
+  "grade": {
+    "title": "수능 등급 성적표",
+    "subtitle": "AI 모델이 실제 수험생이었다면 몇 등급을 받았을지 환산한 결과입니다.",
+    "gradeValue": "{{grade}}등급",
+    "sortByGradeSum": "등급 합 순으로 정렬",
+    "absoluteNote": "영어와 한국사는 절대평가 기준(영어 90점 이상 1등급, 한국사 40점 이상 1등급)으로 계산합니다.",
+    "cutSource": "국어·수학·탐구 등급컷 출처: {{source}}",
+    "sourceUnknown": "출처 미기재",
+    "noCuts": "국어·수학·탐구는 등급컷이 아직 입력되지 않아 원점수만 표시합니다. 등급컷은 web/src/config/examInfo.js에서 입력할 수 있습니다.",
+    "empty": "표시할 모델이 없습니다.",
+    "inquiry1": "탐구 1",
+    "inquiry2": "탐구 2",
+    "gradeSum": "등급 합",
+    "gradeSumHelp": "국어+수학+영어+탐구(2과목 평균) 등급 합",
+    "comboNote": "국어·수학은 선택과목 중 가장 유리한 조합, 탐구는 가장 잘 본 2과목을 골랐습니다(실제 수험생의 과목 선택을 가정).",
+    "qualityTitle": "응답 품질",
+    "qualitySubtitle": "답을 내지 못했거나(무응답) 답을 읽어낼 수 없었던(추출 실패) 문항입니다. 원래 점수에서는 모두 오답으로 처리됩니다.",
+    "qualityAllClean": "모든 모델이 전 문항에 답을 냈습니다.",
+    "qualityCleanCount": "무효 응답이 없는 모델 {{count}}개는 표에서 생략했습니다.",
+    "questions": "채점 문항",
+    "noAnswer": "무응답",
+    "parseFailed": "추출 실패",
+    "invalidRate": "무효 비율",
+    "accuracy": "정답률",
+    "validAccuracy": "유효 응답 정답률",
+    "validAccuracyHelp": "무효 응답을 뺀 문항만으로 계산한 정답률"
   }
 }

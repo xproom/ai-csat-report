@@ -20,6 +20,8 @@ import {
   ScoreTrendChart
 } from '@/components/charts'
 import { ScoreTable, CostTable } from '@/components/tables'
+import GradeReport from '@/components/tables/GradeReport'
+import { getExamInfo } from '@/config/examInfo'
 import { ModelSelectDropdown } from '@/components/common'
 import { calculateAllModelScores, getCostData, getMaxScore, calculateBestWorstScores, calculateImageBasedScores, getSubjectFilterGroups, SCORE_BASIS } from '@/utils/dataTransform'
 import { transformToHeatmapData, transformToRadarData } from '@/utils/heatmapTransform'
@@ -34,7 +36,7 @@ import { applyQuickFilters } from '@/utils/modelFilters'
 /**
  * @brief 탭 정의
  */
-const TAB_KEYS = ['overview', 'subjects', 'compare', 'cost', 'trend']
+const TAB_KEYS = ['overview', 'grade', 'subjects', 'compare', 'cost', 'trend']
 
 /**
  * @brief 결과 준비 중 화면에 표시할 과목별 문제 공개 시각
@@ -173,7 +175,13 @@ function Dashboard({
   const [selectedSection, setSelectedSection] = useState(INITIAL_UI_STATE.selectedSection)
   const [compareModels, setCompareModels] = useState([])
   /** @brief 빠른 필터 상태 (모델 선택 배열과 별개로 선택 결과에만 적용) */
-  const [quickFilters, setQuickFilters] = useState({ freeOnly: false, latestOnly: false })
+  const [quickFilterState, setQuickFilters] = useState({ freeOnly: false, latestOnly: false, examDayOnly: false })
+  /** @brief 시험일 기준 필터를 위해 현재 시험 시행일을 빠른 필터에 합침 */
+  const examDate = getExamInfo(exam?.id).examDate
+  const quickFilters = useMemo(
+    () => ({ ...quickFilterState, examDate, examDayOnly: Boolean(examDate) && quickFilterState.examDayOnly }),
+    [quickFilterState, examDate]
+  )
   const [hoveredModel, setHoveredModel] = useState(null)
   const [scoreViewMode, setScoreViewMode] = useState(INITIAL_UI_STATE.scoreView)
   const [isModelSelectionTouched, setIsModelSelectionTouched] = useState(false)
@@ -349,7 +357,7 @@ function Dashboard({
     return result
   }, [overallScores, filters, quickFilters, modelMetadata])
 
-  const isQuickFilterActive = quickFilters.freeOnly || quickFilters.latestOnly
+  const isQuickFilterActive = quickFilters.freeOnly || quickFilters.latestOnly || quickFilters.examDayOnly
 
   // 보기 모드에 따른 점수 차트 데이터
   const scoreChartData = useMemo(() => {
@@ -983,6 +991,14 @@ function Dashboard({
                   )
                 })()}
 
+                {/* 등급 성적표 탭 */}
+                {activeTab === 'grade' && isQuickFilterActive && filteredScores.length === 0 && (
+                  <_QuickFilterEmptyState message={t('common.noQuickFilterMatch')} />
+                )}
+                {activeTab === 'grade' && !(isQuickFilterActive && filteredScores.length === 0) && (
+                  <GradeReport data={data} models={displayModels} exam={exam} />
+                )}
+
                 {/* 상세 분석 탭 */}
                 {activeTab === 'cost' && isQuickFilterActive && filteredScores.length === 0 && (
                   <_QuickFilterEmptyState message={t('common.noQuickFilterMatch')} />
@@ -1092,9 +1108,7 @@ export default function App() {
   useEffect(() => {
     if (!catalog) return
     const currentExam = catalog.exams.find(item => item.id === selectedExamId) || catalog.exams.find(item => item.id === catalog.default_exam) || catalog.exams[0]
-    document.title = currentExam.id === 'csat-2026'
-      ? t('header.title')
-      : currentExam.title.replace(/ LLM 벤치마크$/, ' LLM 풀이 대시보드')
+    document.title = `${currentExam.short_name} · ${t('header.title')}`
   }, [catalog, selectedExamId, t])
 
   if (catalogLoading) {

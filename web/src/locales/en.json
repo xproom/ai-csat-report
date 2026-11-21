@@ -1,8 +1,8 @@
 {
   "header": {
-    "title": "2026 CSAT LLM Solution Dashboard",
-    "titleShort": "CSAT LLM",
-    "titleSuffix": "LLM Solution Dashboard",
+    "title": "AI CSAT Report Card",
+    "titleShort": "AI CSAT",
+    "titleSuffix": "AI Report Card",
     "csatName": "CSAT",
     "mockExamName": "Mock Exam",
     "mockEvaluationName": "Mock Evaluation",
@@ -24,7 +24,8 @@
     "subjects": "Subject Details",
     "compare": "Model Comparison",
     "cost": "Detailed Analysis",
-    "trend": "Score Trend"
+    "trend": "Score Trend",
+    "grade": "Grade Report"
   },
   "trend": {
     "title": "Score Trend by Release Date",
@@ -48,8 +49,18 @@
     "unclassifiedModels_other": "{{count}} models without plan information are not shown."
   },
   "analysis": {
-    "metrics": { "score": "Score", "cost": "Cost", "tokens": "Tokens", "time": "Time" },
-    "units": { "points": "pts", "dollars": "$", "tokens": "tokens", "hours": "hours" },
+    "metrics": {
+      "score": "Score",
+      "cost": "Cost",
+      "tokens": "Tokens",
+      "time": "Time"
+    },
+    "units": {
+      "points": "pts",
+      "dollars": "$",
+      "tokens": "tokens",
+      "hours": "hours"
+    },
     "xAxis": "X-axis metric",
     "yAxis": "Y-axis metric",
     "estimatedTime": "Estimated solving time",
@@ -89,7 +100,9 @@
       "vendor": "By Vendor",
       "costAsc": "Lowest Cost",
       "efficiencyDesc": "Highest Efficiency"
-    }
+    },
+    "examDayOnly": "Exam-day models",
+    "examDayOnlyHelp": "Only models released on or before the exam date. They cannot have trained on the exam."
   },
   "charts": {
     "totalScore": "Total Score",
@@ -352,5 +365,32 @@
     "contact": "Contact email",
     "lastUpdated": "Last updated",
     "unofficial": "This is an unofficial project. Not affiliated with KICE."
+  },
+  "grade": {
+    "title": "CSAT Grade Report",
+    "subtitle": "Grades each model would have received as a real test taker.",
+    "gradeValue": "G{{grade}}",
+    "sortByGradeSum": "Sort by grade sum",
+    "absoluteNote": "English and Korean History use absolute grading (English 90+ = G1, History 40+ = G1).",
+    "cutSource": "Korean/Math/Inquiry cut source: {{source}}",
+    "sourceUnknown": "not specified",
+    "noCuts": "Grade cuts for Korean, Math and Inquiry are not entered yet, so only raw scores are shown. Enter them in web/src/config/examInfo.js.",
+    "empty": "No models to show.",
+    "inquiry1": "Inquiry 1",
+    "inquiry2": "Inquiry 2",
+    "gradeSum": "Grade sum",
+    "gradeSumHelp": "Korean + Math + English + Inquiry (avg of 2)",
+    "comboNote": "Korean/Math use the most favorable elective; Inquiry uses the best two subjects.",
+    "qualityTitle": "Response Quality",
+    "qualitySubtitle": "Questions with no answer or an unreadable answer. These count as wrong in the raw score.",
+    "qualityAllClean": "Every model answered every question.",
+    "qualityCleanCount": "{{count}} models with no invalid responses are hidden.",
+    "questions": "Questions",
+    "noAnswer": "No answer",
+    "parseFailed": "Parse failed",
+    "invalidRate": "Invalid rate",
+    "accuracy": "Accuracy",
+    "validAccuracy": "Valid accuracy",
+    "validAccuracyHelp": "Accuracy over answered questions only"
   }
 }

@@ -6,6 +6,7 @@
 import { useState, useRef, useEffect, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ThemeToggle, LanguageSwitcher } from '@/components/common'
+import { BRAND } from '@/config/brand'
 import './Header.css'
 
 /** @description 현재 언어에 맞춘 시험명 표시 */
@@ -115,16 +116,18 @@ export default function Header({
 
         {/* 제목 + 모드 토글 */}
         <div className="header__brand flex-1 min-w-0 flex items-center gap-3 md:flex-none md:gap-4">
-          <a
-            href="https://github.com/hehee9/CSAT-benchmark"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="GitHub"
-            aria-label="GitHub"
-            className="header__github-link shrink-0 text-gray-300 hover:text-white rounded-lg transition-colors"
-          >
-            <GitHubIcon />
-          </a>
+          {BRAND.repoUrl && (
+            <a
+              href={BRAND.repoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="GitHub"
+              aria-label="GitHub"
+              className="header__github-link shrink-0 text-gray-300 hover:text-white rounded-lg transition-colors"
+            >
+              <GitHubIcon />
+            </a>
+          )}
 
           {/* 제목 블록 */}
           <div className="header__title-block min-w-0">

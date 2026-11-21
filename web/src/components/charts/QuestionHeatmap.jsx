@@ -11,6 +11,7 @@ import { getQuestionNumbers, calculateModelAccuracy } from '@/utils/heatmapTrans
 import { useExportImage, README_EXPORT_WIDTH } from '@/hooks/useExportImage'
 import { BenchmarkNote, ExportButton, NoWebSearchBadge, TestEnvCaption } from '@/components/common'
 import { formatModelDisplayName } from '@/utils/modelMeta'
+import { BRAND } from '@/config/brand'
 
 /** @brief 내보내기 이미지의 데이터 행 높이(px) */
 const EXPORT_ROW_HEIGHT = 48
@@ -202,7 +203,7 @@ export default function QuestionHeatmap({ data, models, title, subjectName, mode
         <TestEnvCaption className="col-span-2 col-start-1 row-start-3 mt-1.5 sm:col-span-1 sm:row-start-2" />
         {/* 내보내기 이미지에서는 워터마크를 머리말 아래쪽, 표 오른쪽 끝에 맞춘다 */}
         <div className={`col-start-2 row-start-2 mt-1.5 flex items-start gap-2 sm:row-span-2 sm:row-start-1 sm:mt-0 ${isExporting ? 'self-end' : ''}`}>
-          <span className="export-role-watermark hidden text-base leading-tight text-gray-400" data-export-show="true">Github/hehee9</span>
+          <span className="export-role-watermark hidden text-base leading-tight text-gray-400" data-export-show="true">{BRAND.watermark}</span>
           <button
             className={`whitespace-nowrap px-3 py-1.5 text-sm rounded-lg transition-colors ${
               showAnswerNumbers

@@ -3,8 +3,8 @@
  * @brief 서비스 워커 - 기본 캐싱 전략
  */
 
-const CACHE_NAME = 'csat-benchmark-v1'
-const BASE_PATH = '/CSAT-benchmark'
+const CACHE_NAME = 'ai-csat-report-v1'
+const BASE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, '')
 
 // 캐시할 정적 에셋
 const STATIC_ASSETS = [

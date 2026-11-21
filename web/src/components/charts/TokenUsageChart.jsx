@@ -23,6 +23,7 @@ import { useExportImage, README_EXPORT_WIDTH } from '@/hooks/useExportImage'
 import { useBarChartExportLayout } from '@/hooks/useBarChartExportLayout'
 import { BenchmarkNote, ExportButton, NoWebSearchBadge, TestEnvCaption } from '@/components/common'
 import { formatModelDisplayName, getModelFlags } from '@/utils/modelMeta'
+import { BRAND } from '@/config/brand'
 
 const EXPORT_AXIS_FONT_SIZE = 24
 const EXPORT_MODEL_FONT_SIZE = 26
@@ -588,7 +589,7 @@ export default function TokenUsageChart({
           <TestEnvCaption className="mt-1.5" />
         </div>
         <div className="flex items-start gap-2">
-          <span className="export-role-watermark hidden text-base text-gray-400 mt-8" data-export-show="true">Github/hehee9</span>
+          <span className="export-role-watermark hidden text-base text-gray-400 mt-8" data-export-show="true">{BRAND.watermark}</span>
           <ExportButton
             onClick={() => exportImage(`${t('export.tokenUsage')}.png`)}
             exportKey="token-usage"

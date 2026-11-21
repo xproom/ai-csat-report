@@ -1,9 +1,9 @@
 {
-  "name": "수능 LLM 벤치마크 대시보드",
-  "short_name": "수능 LLM",
-  "description": "다양한 LLM 모델의 수능 문제 풀이 결과 대시보드",
-  "start_url": "/CSAT-benchmark/",
-  "scope": "/CSAT-benchmark/",
+  "name": "AI 수능 성적표",
+  "short_name": "AI 수능",
+  "description": "AI 모델의 수능 풀이 결과를 등급과 함께 보여주는 성적표",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#111827",
   "theme_color": "#111827",
@@ -11,17 +11,20 @@
   "lang": "ko",
   "icons": [
     {
-      "src": "/CSAT-benchmark/icons/icon-192.png",
+      "src": "icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/CSAT-benchmark/icons/icon-512.png",
+      "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     }
   ],
-  "categories": ["education", "utilities"]
+  "categories": [
+    "education",
+    "utilities"
+  ]
 }

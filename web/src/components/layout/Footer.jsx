@@ -6,6 +6,7 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useData } from '@/hooks/useData'
+import { BRAND, UPSTREAM } from '@/config/brand'
 
 /**
  * @brief "YYYY-MM-DD HH:mm:ss" 형식 문자열을 Date로 파싱
@@ -119,29 +120,37 @@ export default function Footer() {
       <div className="container mx-auto text-center">
         {/* 링크 영역 */}
         <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-2 mb-3">
-          <a
-            href="https://github.com/hehee9/CSAT-benchmark"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
-          >
-            <GitHubIcon />
-            <span>GitHub</span>
-          </a>
-          <a
-            href="mailto:gyugyum@gmail.com"
-            aria-label={t('footer.contact')}
-            title={t('footer.contact')}
-            className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
-          >
-            <MailIcon />
-            <span>gyugyum@gmail.com</span>
-          </a>
+          {BRAND.repoUrl && (
+            <a
+              href={BRAND.repoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+            >
+              <GitHubIcon />
+              <span>GitHub</span>
+            </a>
+          )}
+          {BRAND.contactEmail && (
+            <a
+              href={`mailto:${BRAND.contactEmail}`}
+              aria-label={t('footer.contact')}
+              title={t('footer.contact')}
+              className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+            >
+              <MailIcon />
+              <span>{BRAND.contactEmail}</span>
+            </a>
+          )}
         </div>
 
-        {/* 저작권 + 라이선스 */}
+        {/* 저작권 + 라이선스 (원본 MIT 고지 유지) */}
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          © 2025 hehee9 · MIT License
+          © {new Date().getFullYear()} {BRAND.owner || BRAND.name} · MIT License · Based on{' '}
+          <a href={UPSTREAM.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-900 dark:hover:text-gray-200">
+            {UPSTREAM.name}
+          </a>{' '}
+          by {UPSTREAM.author}
         </p>
 
         {/* 최종 업데이트 */}

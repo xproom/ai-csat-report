@@ -10,6 +10,7 @@ import { useExportImage, README_EXPORT_WIDTH } from '@/hooks/useExportImage'
 import { BenchmarkNote, ExportButton, ModelNameButton, NoWebSearchBadge, TestEnvCaption } from '@/components/common'
 import { formatModelDisplayName } from '@/utils/modelMeta'
 import { formatAnalysisMetricValue } from '@/utils/analysisMetrics'
+import { BRAND } from '@/config/brand'
 
 /**
  * @brief 정렬 아이콘 컴포넌트
@@ -303,7 +304,7 @@ export default function CostTable({ data, title, showDetail = false, onToggleDet
           <TestEnvCaption className="mt-1.5" />
         </div>
         <div className="flex items-start gap-2">
-          <span className="hidden text-base text-gray-400 mt-8" data-export-show="true">Github/hehee9</span>
+          <span className="hidden text-base text-gray-400 mt-8" data-export-show="true">{BRAND.watermark}</span>
           <ExportButton
             onClick={() => exportImage(`${t('export.costAnalysis')}.png`)}
             exportKey="cost-table"

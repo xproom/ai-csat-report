@@ -78,11 +78,18 @@ export function isFreeModel(modelName, modelMetadata) {
  * @param {Object} modelMetadata - 모델명별 메타데이터
  * @returns {string[]} 조건을 만족하는 모델명 목록
  */
-export function applyQuickFilters(modelNames, { freeOnly, latestOnly }, modelMetadata) {
+export function isReleasedByExamDate(modelName, examDate, modelMetadata) {
+  const releaseDate = modelMetadata[modelName]?.releaseDate
+  if (!examDate || !releaseDate) return false
+  return releaseDate <= examDate
+}
+
+export function applyQuickFilters(modelNames, { freeOnly, latestOnly, examDayOnly = false, examDate = '' }, modelMetadata) {
   const latestVersionModelNames = latestOnly ? getLatestVersionModelNames(modelMetadata) : null
 
   return modelNames.filter(modelName => {
     if (freeOnly && !isFreeModel(modelName, modelMetadata)) return false
+    if (examDayOnly && !isReleasedByExamDate(modelName, examDate, modelMetadata)) return false
     return !latestOnly || isLatestVersionModel(modelName, latestVersionModelNames, modelMetadata)
   })
 }

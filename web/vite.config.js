@@ -33,7 +33,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss()],
-    base: '/CSAT-benchmark/',
+    base: process.env.VITE_BASE || '/',
     publicDir,
     build: {
       outDir: outputDir,

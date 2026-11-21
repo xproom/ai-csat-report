@@ -274,6 +274,16 @@ export default function ModelFilter({ selected, onChange, hoveredModel, onModelH
         >
           {t('sidebar.latestOnly')}
         </_QuickFilterToggle>
+        {quickFilters.examDate && (
+          <span title={t('sidebar.examDayOnlyHelp')}>
+            <_QuickFilterToggle
+              pressed={quickFilters.examDayOnly}
+              onToggle={() => onQuickFiltersChange({ ...quickFilters, examDayOnly: !quickFilters.examDayOnly })}
+            >
+              {t('sidebar.examDayOnly')}
+            </_QuickFilterToggle>
+          </span>
+        )}
       </div>
 
       <div className="space-y-2">
