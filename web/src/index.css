@@ -109,3 +109,9 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .pen-stroke, .stamp { animation: none; }
 }
+
+/* 채점표 항목이 차례로 나타남 */
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[fadein_0\.25s_ease-out_forwards\] { animation: none; opacity: 1; }
+}

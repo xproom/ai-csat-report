@@ -10,7 +10,7 @@ import AnswerKeyUpload from '@/components/AnswerKeyUpload'
 import CoverOptionsForm from '@/components/CoverOptionsForm'
 import { FileUploader, PaperViewer } from '@/components/FileUploader'
 import OmrCard, { OmrLegend } from '@/components/OmrCard'
-import OmrSimulator from '@/components/OmrSimulator'
+import SolveViewer from '@/components/SolveViewer'
 import PaperCover from '@/components/PaperCover'
 import PerformanceView from '@/components/PerformanceView'
 import RunPanel from '@/components/RunPanel'
@@ -24,7 +24,7 @@ const TABS = [
   ['paper', '문제지'],
   ['key', '정답·배점'],
   ['omr', 'OMR'],
-  ['sim', '시뮬레이션'],
+  ['sim', 'AI 풀이 보기'],
   ['results', '결과'],
   ['perf', '성능 평가']
 ]
@@ -172,7 +172,7 @@ export default function PaperPage({ paperId, tab, runId, edit }) {
 
       {tab === 'omr' && <OmrTab key={runId || 'answer-key'} paper={paper} runs={runs} runId={runId} edit={edit} />}
 
-      {tab === 'sim' && <OmrSimulator key={paper.id} paper={paper} runs={runs} initialRunId={runId} />}
+      {tab === 'sim' && <SolveViewer key={paper.id} paper={paper} runs={runs} files={files} initialRunId={runId} />}
 
       {tab === 'results' && <ResultsTab paper={paper} runs={runs} files={files} />}
 

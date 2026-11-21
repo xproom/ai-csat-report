@@ -9,7 +9,7 @@ import { db } from '@/lib/db'
 import { formatRate } from '@/lib/grading'
 import { answerMatrix, evaluateRuns, highlights, performanceCsv } from '@/lib/performance'
 import { missingAnswers, paperTitle, QUESTION_TYPES } from '@/lib/schema'
-import { formatDuration } from '@/lib/simulation'
+import { formatDuration } from '@/lib/replay'
 import { useStore } from '@/lib/store'
 
 const CIRCLED = ['①', '②', '③', '④', '⑤']
@@ -235,7 +235,7 @@ export default function PerformanceView({ paper, runs }) {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
             <h3 className="text-lg font-extrabold">실제 정답 vs 모델 답</h3>
-            <p className="text-xs text-[var(--color-ink-soft)]">{visibleMatrix.length}/{matrix.length}문항 표시</p>
+            <p className="text-xs text-[var(--color-ink-soft)]">{visibleMatrix.length}/{matrix.length}문항 표시 · 실시간 풀이 기록은 칸 아래에 문항별 실제 시간 표시</p>
           </div>
           <div className="segmented flex-wrap" role="group" aria-label="문항 필터">
             {FILTERS.map(([key, label]) => (
@@ -260,7 +260,9 @@ export default function PerformanceView({ paper, runs }) {
                     {row.allWrong && <span className="ml-1 rounded bg-red-50 px-1 text-[0.65rem] font-bold text-[var(--color-pen)]">전원 오답</span>}
                   </td>
                   <td className="px-3 py-1.5 text-center font-bold bg-emerald-50/60">{row.type === 'essay' ? '서술' : shortAnswer(row.type, String(row.expected).split('|')[0])}</td>
-                  {row.cells.map(cell => (
+                  {row.cells.map(cell => {
+                    const seconds = runs.find(item => item.id === cell.runId)?.perQuestionMs?.[row.no]
+                    return (
                     <td key={cell.runId} className="px-1.5 py-1">
                       <span className={`block rounded-md px-2 py-1 text-center font-semibold ${cell.status !== 'answered'
                         ? 'bg-gray-100 text-gray-400'
@@ -269,8 +271,10 @@ export default function PerformanceView({ paper, runs }) {
                       >
                         {cell.status !== 'answered' ? '무응답' : row.type === 'essay' ? (cell.correct === null ? '채점 대기' : cell.correct ? '만점' : '감점') : shortAnswer(row.type, cell.answer)}
                       </span>
+                      {seconds ? <span className="block text-center text-[0.65rem] tabular-nums text-[var(--color-ink-soft)]">{formatDuration(seconds)}</span> : null}
                     </td>
-                  ))}
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>

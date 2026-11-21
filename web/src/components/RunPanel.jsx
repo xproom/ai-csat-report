@@ -119,6 +119,7 @@ export default function RunPanel({ paper, files }) {
             </p>
           )}
           {!files.length && <p className="text-sm text-[var(--color-pen)]">먼저 ‘문제지’ 탭에서 문제지 파일을 올려 주세요.</p>}
+          <p className="text-sm">여기서는 문제지 전체를 한 번에 풉니다. AI가 문항을 하나씩 풀며 OMR에 마킹하는 과정을 실제 속도로 보려면 <a href={`#/paper/${paper.id}?tab=sim`} className="font-bold text-[var(--color-brand)] underline">AI 풀이 보기</a> 탭에서 실시간으로 풀게 하세요.</p>
           <div>
             <span className="field-label">풀이할 모델 (여러 개 선택 가능)</span>
             <div className="flex flex-wrap gap-2">
