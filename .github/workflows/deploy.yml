@@ -1,18 +1,19 @@
 name: Deploy to GitHub Pages
 
+# main에 올라올 때와 수동 실행 시에만 배포합니다.
+# (원본의 매시간 cron과 README 이미지 내보내기 단계는 제거했습니다)
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths-ignore:
       - 'docs/**'
       - 'images/**'
-  schedule:
-    - cron: '0 * * * *'
+      - '**.md'
   workflow_dispatch:
 
 concurrency:
-  group: csat-dashboard-publish
-  cancel-in-progress: false
+  group: pages-deploy
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -38,46 +39,23 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm ci
 
-      - name: Read Playwright version
-        id: playwright-version
-        working-directory: web
-        run: |
-          version=$(node -p "require('./node_modules/playwright/package.json').version")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
-
-      - name: Use Azure Ubuntu package mirror
-        run: |
-          sudo sed -i '/priority:1[[:space:]]*$/s#http://us-east-2[.]ec2[.]archive[.]ubuntu[.]com/ubuntu/#http://azure.archive.ubuntu.com/ubuntu/#' /etc/apt/apt-mirrors.txt
-
-      - name: Install Playwright Chromium and dependencies
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        working-directory: web
-        run: npx playwright install --with-deps chromium
-
-      - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        working-directory: web
-        run: npx playwright install-deps chromium
-
+      # OPENROUTER_API_KEY 시크릿을 등록한 경우에만 처리 속도 정보를 갱신합니다.
       - name: Refresh OpenRouter throughput snapshot
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        if: env.OPENROUTER_API_KEY != ''
         run: node web/scripts/refresh-model-performance.mjs
 
-      - name: Sync dashboard assets
+      - name: Build site
         working-directory: web
         env:
-          EXPORT_CONCURRENCY: '3'
-        run: npm run sync:assets
+          # 저장소 이름 경로로 배포 (https://<user>.github.io/<repo>/)
+          VITE_BASE: /${{ github.event.repository.name }}/
+        run: npm run build:pages
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v5
