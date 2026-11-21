@@ -53,15 +53,74 @@ export function createLineParser(onLine) {
   }
 }
 
-const LINE_PATTERN = /^\s*(?:[-*]\s*)?(PAGE|STEP|WORK|ANSWER|답)\s*[:：]\s*(.*)$/i
+/** 줄 머리표 → 이벤트 종류 (모델이 영어·한국어 어느 쪽으로 써도 인식) */
+const LABELS = [
+  ['answer', 'FINAL\\s*ANSWER|ANSWER|최종\\s*답(?:안)?|정답|답'],
+  ['page', 'PAGE|쪽|페이지|위치'],
+  ['step', 'STEP|THINK|생각|단계'],
+  ['work', 'WORK|CALC|풀이|계산|식|메모']
+]
+const LABEL_SOURCE = LABELS.map(([, source]) => source).join('|')
+// 머리표 뒤에는 콜론(:, ：)이나 대시가 와야 함 ("답은 3"처럼 문장 속 단어는 머리표로 보지 않음)
+const LABEL_PATTERN = new RegExp(`(?:^|\\s)(${LABEL_SOURCE})\\s*(?:\\(\\s*[^)]*\\))?\\s*[:：]\\s*`, 'gi')
 
-/** @brief 한 줄을 이벤트 종류로 분류 (형식 밖의 줄은 풀이 메모로 취급) */
+/** @brief 마크다운 꾸밈(**굵게**, `코드`, #, >, 목록 기호) 제거 */
+export function stripMarkdown(line) {
+  return String(line ?? '')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/^\s*(?:[#>]+|[-*•]|\d+[.)])\s+/, '')
+    .trim()
+}
+
+function kindOf(label) {
+  const normalized = label.replace(/\s+/g, '')
+  for (const [kind, source] of LABELS) {
+    if (new RegExp(`^(?:${source})$`, 'i').test(normalized)) return kind
+  }
+  return 'work'
+}
+
+/**
+ * @brief 한 줄을 이벤트 목록으로 분류
+ * - "**ANSWER:** ③", "답: 3", "- STEP: …" 모두 인식
+ * - "PAGE: 1-2 STEP: … ANSWER: 3"처럼 한 줄에 여러 머리표가 있어도 나눔
+ * - 머리표가 없는 줄은 풀이 메모(work)로 취급
+ * @returns {Array<{ kind: string, text: string }>}
+ */
 export function classifyLine(line) {
-  const match = line.match(LINE_PATTERN)
-  if (!match) return { kind: 'work', text: line.replace(/^[-*]\s*/, '') }
-  const key = match[1].toUpperCase()
-  const kind = key === '답' ? 'answer' : key.toLowerCase()
-  return { kind, text: match[2].trim() }
+  const clean = stripMarkdown(line)
+  if (!clean || /^```/.test(String(line).trim())) return []
+  const matches = [...clean.matchAll(LABEL_PATTERN)]
+  if (!matches.length) return [{ kind: 'work', text: clean }]
+  const parts = []
+  const lead = clean.slice(0, matches[0].index).trim()
+  if (lead) parts.push({ kind: 'work', text: lead })
+  matches.forEach((match, index) => {
+    const start = match.index + match[0].length
+    const end = index + 1 < matches.length ? matches[index + 1].index : clean.length
+    parts.push({ kind: kindOf(match[1]), text: clean.slice(start, end).trim() })
+  })
+  return parts
+}
+
+/**
+ * @brief 머리표 있는 답 줄이 없을 때 응답 전체에서 답을 찾음
+ * - 객관식: "답은 ③", "정답 3번" 같은 표현 → 없으면 마지막에 나온 ①~⑤
+ * - 단답형·서술형: "답: …"·"답은 …" 표현 → 없으면 마지막 줄
+ */
+export function extractAnswerFallback(question, fullText) {
+  const text = String(fullText ?? '').replace(/\*\*|__|`/g, '')
+  if (!text.trim()) return ''
+  if (question.type === 'choice') {
+    const phrases = [...text.matchAll(/(?:최종\s*답|정답|답|ANSWER)\s*(?:은|는|:|：|=|→)?\s*(?:번호\s*)?([①-⑤]|[1-9](?!\d))/gi)]
+    if (phrases.length) return normalizeChoice(phrases.at(-1)[1])
+    const circled = [...text.matchAll(/[①-⑤]/g)]
+    return circled.length ? normalizeChoice(circled.at(-1)[0]) : ''
+  }
+  const phrases = [...text.matchAll(/(?:최종\s*답|정답|답|ANSWER)\s*(?:은|는|:|：|=|→)\s*([^\n]+)/gi)]
+  if (phrases.length) return phrases.at(-1)[1].replace(/[.。]$/, '').trim()
+  const lines = text.split('\n').map(stripMarkdown).filter(Boolean)
+  return question.type === 'essay' ? lines.at(-1) ?? '' : ''
 }
 
 /** @brief "1-2" → { file: 0, page: 2 } */
@@ -96,6 +155,52 @@ async function buildCachedBlocks(files) {
   if (!blocks.length) throw new Error('풀 수 있는 문제지 파일(PDF·사진)이 없습니다.')
   blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: { type: 'ephemeral' } }
   return blocks
+}
+
+const PAGE_MAP_SCHEMA = {
+  type: 'object',
+  properties: {
+    pages: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { no: { type: 'integer' }, file: { type: 'integer' }, page: { type: 'integer' } },
+        required: ['no', 'file', 'page'],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ['pages'],
+  additionalProperties: false
+}
+
+/**
+ * @brief 풀기 전에 문항 번호별 위치(파일·쪽)를 한 번에 찾음
+ * - 화면에 해당 문항이 있는 쪽을 보여주기 위해 사용 (모델이 풀면서 PAGE를 빠뜨려도 쪽이 맞게 바뀜)
+ * - 이 요청이 문제지를 캐시에 올려 두므로, 이어지는 문항 요청은 캐시를 읽음
+ * @returns {Promise<Record<number, { file: number, page: number }>>} file은 0부터
+ */
+export async function locateQuestions({ client, modelInfo, blocks, paper, signal }) {
+  const response = await client.messages.create({
+    model: modelInfo.id,
+    max_tokens: 8000,
+    system: '첨부한 시험 문제지에서 각 문항 번호가 처음 나오는 위치를 찾습니다. 문제를 풀지 말고 위치만 답하세요.',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: PAGE_MAP_SCHEMA } },
+    messages: [{
+      role: 'user',
+      content: [...blocks, { type: 'text', text: `문항 번호 ${paper.questions.map(question => question.no).join(', ')}이 각각 몇 번째 첨부 파일(1부터)의 몇 쪽(1부터)에 있는지 알려 주세요. 찾을 수 없는 번호는 빼세요.` }]
+    }]
+  }, { signal })
+  const text = response.content.filter(block => block.type === 'text').map(block => block.text).join('')
+  const map = {}
+  try {
+    for (const item of JSON.parse(text).pages ?? []) {
+      if (Number.isInteger(item.no) && item.page >= 1) map[item.no] = { file: Math.max(0, (item.file || 1) - 1), page: item.page }
+    }
+  } catch {
+    // 위치를 못 찾아도 풀이는 계속함
+  }
+  return map
 }
 
 /** @brief 생각 요약 스트림을 문장 단위 이벤트로 묶음 */
@@ -139,29 +244,36 @@ async function solveOne({ client, modelInfo, effort, blocks, paper, question, si
     : client.messages.stream(request, { signal })
 
   let answerText = ''
+  let fullText = ''
   let page = null
   let sawAnswerLine = false
   const think = createThinkCollector(text => emit('think', text))
   const lines = createLineParser(line => {
-    const { kind, text } = classifyLine(line)
-    if (kind === 'page') {
-      page = parsePageRef(text)
-      if (page) emit('page', `${page.file + 1}-${page.page}`)
-      return
+    for (const { kind, text } of classifyLine(line)) {
+      if (kind === 'page') {
+        page = parsePageRef(text)
+        if (page) emit('page', `${page.file + 1}-${page.page}`)
+        continue
+      }
+      if (kind === 'answer') {
+        const cleaned = cleanFinalAnswer(question, text)
+        // "ANSWER:" 줄이 여러 번이면 답이 있는 마지막 줄을 씀
+        if (cleaned || !sawAnswerLine) answerText = text
+        sawAnswerLine = true
+        if (cleaned) emit('answer', cleaned)
+        continue
+      }
+      if (text) emit(kind, text)
     }
-    if (kind === 'answer') {
-      sawAnswerLine = true
-      answerText = text
-      emit('answer', cleanFinalAnswer(question, text) || text)
-      return
-    }
-    if (text) emit(kind, text)
   })
 
   for await (const event of stream) {
     if (event.type !== 'content_block_delta') continue
     if (event.delta.type === 'thinking_delta') think.feed(event.delta.thinking)
-    else if (event.delta.type === 'text_delta') lines.feed(event.delta.text)
+    else if (event.delta.type === 'text_delta') {
+      fullText += event.delta.text
+      lines.feed(event.delta.text)
+    }
   }
   think.flush()
   lines.flush()
@@ -170,7 +282,12 @@ async function solveOne({ client, modelInfo, effort, blocks, paper, question, si
   if (message.stop_reason === 'refusal') {
     emit('step', '이 문항은 모델이 응답을 거절했습니다.')
   }
-  const answer = cleanFinalAnswer(question, answerText)
+  let answer = cleanFinalAnswer(question, answerText)
+  // 형식을 어긴 응답이어도 본문에서 답을 찾아 마킹
+  if (!answer) {
+    answer = cleanFinalAnswer(question, extractAnswerFallback(question, fullText))
+    if (answer) emit('answer', answer)
+  }
   return {
     answer,
     status: answer ? 'answered' : sawAnswerLine || message.stop_reason === 'max_tokens' ? 'parse_failed' : 'no_answer',
@@ -187,7 +304,7 @@ async function solveOne({ client, modelInfo, effort, blocks, paper, question, si
  * @param {(event: Object) => void} options.onEvent - trace 이벤트가 생길 때마다 호출
  * @returns {Promise<Object>} 풀이 기록(Run) - trace, perQuestionMs 포함
  */
-export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, files, signal, onEvent }) {
+export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, files, signal, onEvent, onStatus, onPageMap }) {
   if (!apiKey) throw new Error('설정에서 Anthropic API 키를 먼저 입력하세요.')
   if (!files?.length) throw new Error('문제지 파일이 없습니다. 먼저 문제지를 업로드하세요.')
   if (estimateRequestBytes(files) > MAX_REQUEST_BYTES) {
@@ -197,6 +314,24 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
   const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
   const blocks = await buildCachedBlocks(files)
+
+  // 0단계: 문항 위치 찾기 (수행 시간에는 넣지 않음). 키·크레딧 오류는 여기서 바로 드러나 25문항을 헛돌지 않음
+  onStatus?.('문제지에서 문항 위치를 찾는 중…')
+  const locateStarted = performance.now()
+  let pageMap = {}
+  try {
+    pageMap = await locateQuestions({ client, modelInfo, blocks, paper, signal })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    const info = describeApiError(error)
+    if (info.fatal && info.status !== 400) throw new Error(info.message)
+    if (info.status === 400 && /credit|balance|billing/i.test(info.message)) throw new Error(info.message)
+    // 그 밖의 오류는 위치 없이 계속 (풀이 요청에서 다시 판단)
+  }
+  const locateMs = Math.round(performance.now() - locateStarted)
+  onPageMap?.(pageMap)
+  onStatus?.('')
+
   const started = performance.now()
   const trace = []
   const answers = {}
@@ -218,6 +353,7 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
       onEvent?.(event)
     }
     emit('start')
+    if (pageMap[question.no]) emit('page', `${pageMap[question.no].file + 1}-${pageMap[question.no].page}`)
     for (;;) {
       try {
         const result = await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat })
@@ -269,6 +405,8 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
     usage,
     durationMs: Math.round(performance.now() - started),
     perQuestionMs,
+    pageMap,
+    locateMs,
     trace,
     errors,
     fatalError,

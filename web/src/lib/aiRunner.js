@@ -193,7 +193,9 @@ async function callClaude({ apiKey, modelInfo, effort, system, content, signal }
       : await client.messages.create(request, { signal })
   } catch (error) {
     if (signal?.aborted) throw error
-    if (!(modelInfo.fallback && Number(error?.status) === 400)) throw new Error(describeApiError(error).message)
+    // 크레딧 부족처럼 기능과 무관한 400은 다시 보내도 같으므로 바로 안내
+    const optionalFeatureRejected = modelInfo.fallback && Number(error?.status) === 400 && !/credit|balance|billing/i.test(rawMessage(error))
+    if (!optionalFeatureRejected) throw new Error(describeApiError(error).message)
     try {
       response = await client.messages.create(request, { signal })
     } catch (retryError) {

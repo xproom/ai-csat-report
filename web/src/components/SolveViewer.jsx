@@ -48,7 +48,9 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   // 실시간 풀이 상태
   const [model, setModel] = useState(CLAUDE_MODELS[0].id)
   const [effort, setEffort] = useState('medium')
-  const [live, setLive] = useState(null) // { events, answers, error }
+  const [live, setLive] = useState(null) // { events, answers, error, status, pageMap }
+  // OMR에서 누른 문항 (실시간 풀이 중에 지난 문항을 다시 볼 때)
+  const [focusNo, setFocusNo] = useState(null)
   const liveRef = useRef({ lastT: 0, lastAt: 0, controller: null })
   const apiKey = getApiKey()
   const isLive = Boolean(live && !live.finished)
@@ -85,6 +87,29 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   }, [playing, isLive, speed, total])
 
   const view = useMemo(() => (replay ? stateAt(replay, clock) : null), [replay, clock])
+
+  // OMR에서 고른 문항: 그 문항의 쪽·풀이 노트·답을 끝까지 보여줌 (실시간 풀이 중이든 다시 보기든 같음)
+  const focusView = useMemo(() => {
+    if (focusNo == null || !replay) return null
+    const events = replay.events.filter(event => event.no === focusNo)
+    const state = stateAt({ events, totalMs: Number.POSITIVE_INFINITY }, Number.MAX_SAFE_INTEGER)
+    const start = events.find(event => event.kind === 'start')
+    const end = events.find(event => event.kind === 'end')
+    return {
+      ...state,
+      currentNo: focusNo,
+      page: state.page ?? live?.pageMap?.[focusNo] ?? run?.pageMap?.[focusNo] ?? null,
+      questionElapsedMs: start && end ? end.t - start.t : 0,
+      pending: !start
+    }
+  }, [focusNo, replay, live, run])
+  const display = focusView ?? view
+
+  /** @brief OMR 문항을 누르면 그 문항의 문제·풀이를 보여줌 (같은 문항을 다시 누르면 닫힘) */
+  const selectQuestion = no => {
+    if (!live) setPlaying(false)
+    setFocusNo(prev => (prev === no ? null : no))
+  }
   const done = Boolean(view?.done && !live)
 
   const shownAnswers = useMemo(() => {
@@ -97,6 +122,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   const gradedItems = useMemo(() => (result ? new Map(result.items.map(item => [item.no, item])) : null), [result])
 
   const choose = id => {
+    setFocusNo(null)
     setRunId(id)
     setClock(0)
     setPlaying(false)
@@ -104,6 +130,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   }
 
   const togglePlay = () => {
+    setFocusNo(null)
     if (done) { setClock(0); setPlaying(true); return }
     setPlaying(value => !value)
   }
@@ -113,7 +140,8 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
     liveRef.current = { lastT: 0, lastAt: 0, controller }
     setPlaying(false)
     setClock(0)
-    setLive({ events: [], answers: {}, error: '', finished: false })
+    setFocusNo(null)
+    setLive({ events: [], answers: {}, error: '', finished: false, status: '', pageMap: {} })
     try {
       const saved = await runLiveSolve({
         apiKey,
@@ -122,6 +150,8 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
         paper,
         files,
         signal: controller.signal,
+        onStatus: status => setLive(prev => (prev ? { ...prev, status } : prev)),
+        onPageMap: pageMap => setLive(prev => (prev ? { ...prev, pageMap } : prev)),
         onEvent: event => {
           liveRef.current.lastT = event.t
           liveRef.current.lastAt = performance.now()
@@ -138,6 +168,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
         setLive(prev => ({ ...(prev ?? { events: [], answers: {} }), error: saved.fatalError, finished: true }))
         return
       }
+      setFocusNo(null)
       await db.saveRun(saved)
       await refresh()
       if (saved.fatalError) notify(`오류로 멈췄습니다. 푼 ${answeredCount}문항까지 저장했습니다.`, 'error')
@@ -151,8 +182,8 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
     }
   }
 
-  const currentQuestion = paper.questions.find(question => question.no === view?.currentNo)
-  const pageRef = view?.page ?? (view?.currentNo != null ? guessPage(paper, files, view.currentNo) : { file: 0, page: 1 })
+  const currentQuestion = paper.questions.find(question => question.no === display?.currentNo)
+  const pageRef = display?.page ?? (display?.currentNo != null ? guessPage(paper, files, display.currentNo) : { file: 0, page: 1 })
   const solved = live ? new Set(live.events.filter(event => event.kind === 'end').map(event => event.no)).size : view?.solvedCount ?? 0
 
   return (
@@ -182,6 +213,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
             <div className="font-mono text-3xl sm:text-4xl font-black tabular-nums tracking-tight leading-none">{formatClock(clock, true)}</div>
             <div className="mt-1 font-mono text-xs text-[var(--color-ink-soft)] tabular-nums">
               {String(solved).padStart(2, '0')} / {paper.questions.length}문항
+              {isLive && live.status && <span className="block font-sans text-[var(--color-brand)] animate-pulse">{live.status}</span>}
               {!isLive && total ? ` · 전체 ${formatClock(total)}` : ''}
             </div>
           </div>
@@ -193,7 +225,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
               <button type="button" className="btn btn-primary min-w-[6.5rem]" onClick={togglePlay}>
                 {playing ? '⏸ 일시정지' : done ? '↺ 다시 재생' : clock ? '▶ 이어서' : '▶ 재생'}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => { setPlaying(false); setClock(total) }}>채점 결과로</button>
+              <button type="button" className="btn btn-ghost" onClick={() => { setPlaying(false); setFocusNo(null); setShowSheet(true); setClock(total) }}>채점 결과로</button>
               <div className="segmented ml-auto" role="group" aria-label="재생 속도">
                 {SPEEDS.map(value => (
                   <button key={value} type="button" aria-pressed={speed === value} onClick={() => setSpeed(value)}>{value === 1 ? '실제 속도' : `${value}×`}</button>
@@ -206,7 +238,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
               max={total}
               step="100"
               value={Math.min(clock, total)}
-              onChange={e => { setPlaying(false); setClock(Number(e.target.value)) }}
+              onChange={e => { setPlaying(false); setFocusNo(null); setClock(Number(e.target.value)) }}
               className="w-full accent-[var(--color-brand)]"
               aria-label="재생 위치"
             />
@@ -280,7 +312,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem] items-start">
           {/* 무대: 문제지 + 풀이 노트 + 자막 */}
           <div className="card overflow-hidden p-0">
-            {done && showSheet && result ? (
+            {done && showSheet && result && !focusView ? (
               <div className="p-4 sm:p-6">
                 <GradeSheet paper={paper} run={run} result={result} onReplay={() => { setClock(0); setPlaying(true) }} onClose={() => setShowSheet(false)} />
               </div>
@@ -304,15 +336,23 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
                     <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full bg-[var(--color-ink)] px-3 py-1 text-xs font-bold text-white shadow">
                       <span>{currentQuestion.no}번</span>
                       <span className="opacity-70">{QUESTION_TYPES[currentQuestion.type]} · {currentQuestion.points}점</span>
-                      <span className="font-mono tabular-nums opacity-90">{formatClock(view.questionElapsedMs, true)}</span>
+                      <span className="font-mono tabular-nums opacity-90">{display.pending ? '아직 안 풂' : formatClock(display.questionElapsedMs, true)}</span>
                     </div>
                   )}
 
                   {/* 풀이 노트 (손글씨) */}
-                  {view?.notes.length > 0 && (
+                  {/* 지난 문항 다시 보기 표시 */}
+                  {focusView && (
+                    <div className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900 shadow">
+                      {focusNo}번 다시 보는 중
+                      <button type="button" className="underline" onClick={() => setFocusNo(null)}>{live ? '실시간 화면으로' : '닫기'}</button>
+                    </div>
+                  )}
+
+                  {display?.notes.length > 0 && (
                     <div className="absolute inset-x-3 bottom-14 sm:inset-x-6 max-h-[45%] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[#fffdf6]/95 px-4 py-3 shadow-lg backdrop-blur-[2px]">
                       <ol className="space-y-0.5">
-                        {view.notes.filter(note => note.kind !== 'step').slice(-6).map((note, index) => (
+                        {display.notes.filter(note => note.kind !== 'step').slice(-6).map((note, index) => (
                           <li key={index} className={`font-hand leading-7 break-words ${note.kind === 'answer' ? 'text-3xl text-[var(--color-pen)]' : 'text-2xl text-[#1b2a6b]'}`}>
                             {note.kind === 'answer'
                               ? `답: ${currentQuestion?.type === 'choice' ? CIRCLED[Number(String(note.text).match(/\d+/)?.[0]) - 1] ?? note.visible : note.visible}`
@@ -325,11 +365,11 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
                   )}
 
                   {/* 자막 */}
-                  {view?.caption && (
+                  {display?.caption && (
                     <div className="absolute inset-x-0 bottom-3 flex justify-center px-3">
-                      <span className={`max-w-[95%] rounded-md px-3 py-1.5 text-center text-sm sm:text-base font-semibold leading-snug ${view.caption.kind === 'think' ? 'bg-black/55 text-white/85' : 'bg-black/80 text-white'}`}>
-                        {view.caption.kind === 'think' && <span className="mr-1 text-xs opacity-70">생각 중 ·</span>}
-                        {view.caption.text}
+                      <span className={`max-w-[95%] rounded-md px-3 py-1.5 text-center text-sm sm:text-base font-semibold leading-snug ${display.caption.kind === 'think' ? 'bg-black/55 text-white/85' : 'bg-black/80 text-white'}`}>
+                        {display.caption.kind === 'think' && <span className="mr-1 text-xs opacity-70">생각 중 ·</span>}
+                        {display.caption.text}
                       </span>
                     </div>
                   )}
@@ -345,7 +385,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
 
           {/* OMR 답안지 */}
           <div className="h-[min(72vh,40rem)] lg:sticky lg:top-24">
-            <CompactOmr paper={paper} answers={shownAnswers} currentNo={view?.currentNo ?? null} gradedItems={gradedItems} />
+            <CompactOmr paper={paper} answers={shownAnswers} currentNo={display?.currentNo ?? null} gradedItems={gradedItems} onSelect={selectQuestion} />
           </div>
         </div>
       )}

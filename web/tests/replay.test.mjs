@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildReplay, stateAt, formatClock } from '../src/lib/replay.js'
-import { createLineParser, classifyLine, parsePageRef, cleanFinalAnswer } from '../src/lib/liveSolve.js'
+import { createLineParser, classifyLine, parsePageRef, cleanFinalAnswer, extractAnswerFallback, stripMarkdown } from '../src/lib/liveSolve.js'
 import { createPaper, buildQuestions } from '../src/lib/schema.js'
 
 function paper() {
@@ -23,16 +23,42 @@ test('line parser splits streamed chunks into lines', () => {
 })
 
 test('line classification, page refs and answers', () => {
-  assert.deepEqual(classifyLine('STEP: 공비를 구한다'), { kind: 'step', text: '공비를 구한다' })
-  assert.deepEqual(classifyLine('- WORK：r^2 = 3'), { kind: 'work', text: 'r^2 = 3' })
-  assert.deepEqual(classifyLine('답: 41'), { kind: 'answer', text: '41' })
-  assert.deepEqual(classifyLine('그냥 메모'), { kind: 'work', text: '그냥 메모' })
+  assert.deepEqual(classifyLine('STEP: 공비를 구한다'), [{ kind: 'step', text: '공비를 구한다' }])
+  assert.deepEqual(classifyLine('- WORK：r^2 = 3'), [{ kind: 'work', text: 'r^2 = 3' }])
+  assert.deepEqual(classifyLine('답: 41'), [{ kind: 'answer', text: '41' }])
+  assert.deepEqual(classifyLine('그냥 메모'), [{ kind: 'work', text: '그냥 메모' }])
   assert.deepEqual(parsePageRef('2-3'), { file: 1, page: 3 })
   assert.deepEqual(parsePageRef('4'), { file: 0, page: 4 })
   assert.equal(parsePageRef(''), null)
   const p = paper()
   assert.equal(cleanFinalAnswer(p.questions[0], '③번'), '3')
   assert.equal(cleanFinalAnswer(p.questions[2], ' "41" '), '41')
+})
+
+test('messy model output: markdown, Korean labels, several labels per line', () => {
+  assert.deepEqual(classifyLine('**ANSWER:** ③'), [{ kind: 'answer', text: '③' }])
+  assert.deepEqual(classifyLine('**정답**: 4번'), [{ kind: 'answer', text: '4번' }])
+  assert.deepEqual(classifyLine('### 최종 답: 2'), [{ kind: 'answer', text: '2' }])
+  assert.deepEqual(classifyLine('1. 쪽: 1-3'), [{ kind: 'page', text: '1-3' }])
+  assert.deepEqual(classifyLine('> 생각: 조건을 정리한다'), [{ kind: 'step', text: '조건을 정리한다' }])
+  assert.deepEqual(classifyLine('`PAGE: 1-2`'), [{ kind: 'page', text: '1-2' }])
+  assert.deepEqual(
+    classifyLine('PAGE: 1-2 STEP: 더한다 WORK: 2+1=3 ANSWER: 3').map(part => part.kind),
+    ['page', 'step', 'work', 'answer']
+  )
+  assert.deepEqual(classifyLine('```'), [])
+  // 문장 속 "답은"은 머리표가 아님
+  assert.deepEqual(classifyLine('STEP: 해답은 나중에 확인').map(part => part.kind), ['step'])
+  assert.equal(stripMarkdown('- **WORK:** a = 1'), 'WORK: a = 1')
+})
+
+test('answer fallback when the model ignores the format', () => {
+  const p = paper()
+  assert.equal(extractAnswerFallback(p.questions[0], '계산하면 8이므로 정답은 ②이다.'), '2')
+  assert.equal(extractAnswerFallback(p.questions[0], '보기를 비교하면 ①은 틀리고, 결국 ④'), '4')
+  assert.equal(extractAnswerFallback(p.questions[0], '답: 5번'), '5')
+  assert.equal(extractAnswerFallback(p.questions[2], '그래서 답은 41.'), '41')
+  assert.equal(extractAnswerFallback(p.questions[0], '모르겠다'), '')
 })
 
 test('replay from live trace follows real timestamps', () => {

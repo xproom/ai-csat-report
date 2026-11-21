@@ -137,7 +137,7 @@ export default function DashboardPage() {
             <Kpi label="1위 모델" value={formatRate(board[0]?.avgRate)} sub={board[0]?.model} />
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <div className="grid gap-6 grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
             <div className="card p-4 sm:p-6">
               <h2 className="text-lg font-extrabold">모델 순위 <span className="text-sm font-semibold text-[var(--color-ink-soft)]">평균 득점률</span></h2>
               <p className="text-xs text-[var(--color-ink-soft)]">전체 평균 {formatRate(overall)}</p>
@@ -216,7 +216,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 grid-cols-[minmax(0,1fr)] lg:grid-cols-2">
             <div className="card p-4 sm:p-6">
               <h2 className="text-lg font-extrabold">문항 유형별 득점률</h2>
               <p className="mb-3 text-xs text-[var(--color-ink-soft)]">서술형은 수동 채점한 점수만 반영됩니다.</p>

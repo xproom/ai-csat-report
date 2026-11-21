@@ -46,21 +46,26 @@ export default function AnswerKeyEditor({ paper, onChange }) {
 
   /** @brief 총점이 100점이 되도록 객관식 배점을 고르게 조정 */
   const distributeTo100 = () => {
-    const fixed = paper.questions.filter(question => question.type !== 'choice').reduce((sum, question) => sum + Number(question.points || 0), 0)
-    const choiceQuestions = paper.questions.filter(question => question.type === 'choice')
-    if (!choiceQuestions.length || fixed >= 100) return
-    const remain = 100 - fixed
-    const base = Math.floor((remain / choiceQuestions.length) * 10) / 10
-    let leftover = Math.round((remain - base * choiceQuestions.length) * 10)
-    onChange(prev => ({
-      ...prev,
-      questions: prev.questions.map(question => {
-        if (question.type !== 'choice') return question
-        const extra = leftover > 0 ? 0.1 : 0
-        if (leftover > 0) leftover -= 1
-        return { ...question, points: Math.round((base + extra) * 10) / 10 }
-      })
-    }))
+    // 상태 갱신 함수는 여러 번 호출될 수 있으므로(개발 모드 등) 계산을 모두 함수 안에서 새로 함
+    onChange(prev => {
+      const fixed = prev.questions.filter(question => question.type !== 'choice').reduce((sum, question) => sum + Number(question.points || 0), 0)
+      const choiceCount = prev.questions.filter(question => question.type === 'choice').length
+      if (!choiceCount || fixed >= 100) return prev
+      // 0.1점 단위로 나누고, 남는 0.1점은 앞 문항부터 하나씩 더함
+      const remainTenths = Math.round((100 - fixed) * 10)
+      const baseTenths = Math.floor(remainTenths / choiceCount)
+      const extraCount = remainTenths - baseTenths * choiceCount
+      let choiceIndex = 0
+      return {
+        ...prev,
+        questions: prev.questions.map(question => {
+          if (question.type !== 'choice') return question
+          const tenths = baseTenths + (choiceIndex < extraCount ? 1 : 0)
+          choiceIndex += 1
+          return { ...question, points: tenths / 10 }
+        })
+      }
+    })
   }
 
   const layoutChanged = layout.choiceCount !== counts.choice || layout.shortCount !== counts.short || layout.essayCount !== counts.essay || (firstChoice && layout.choices !== firstChoice.choices)

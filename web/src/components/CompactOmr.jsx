@@ -39,7 +39,7 @@ function GradeMark({ correct }) {
  * @param {number|null} props.currentNo
  * @param {Map<number, Object>|null} props.gradedItems - 채점 결과 (문항 번호 → gradeRun item)
  */
-export default function CompactOmr({ paper, answers, currentNo, gradedItems = null, title = '답안지' }) {
+export default function CompactOmr({ paper, answers, currentNo, gradedItems = null, title = '답안지', onSelect = null }) {
   const listRef = useRef(null)
   const marked = paper.questions.filter(question => answers[question.no]).length
 
@@ -62,6 +62,7 @@ export default function CompactOmr({ paper, answers, currentNo, gradedItems = nu
         <span className="text-sm font-black tracking-[0.2em] text-[var(--color-omr)]">{title}</span>
         <span className="font-mono text-xs font-bold tabular-nums text-[var(--color-ink-soft)]">{String(marked).padStart(2, '0')} / {paper.questions.length}</span>
       </div>
+      {onSelect && <div className="border-b border-[var(--color-omr)]/30 px-3 py-1 text-[0.65rem] text-[var(--color-ink-soft)]">번호를 누르면 그 문항의 문제와 풀이를 봅니다</div>}
       <ol ref={listRef} className="relative flex-1 overflow-y-auto px-2 py-1.5">
         {paper.questions.map(question => {
           const entry = answers[question.no]
@@ -72,7 +73,13 @@ export default function CompactOmr({ paper, answers, currentNo, gradedItems = nu
             <li
               key={question.no}
               data-no={question.no}
-              className={`flex items-center gap-1.5 rounded-md px-1.5 py-[3px] transition-colors ${active ? 'bg-amber-100 ring-1 ring-amber-300' : ''}`}
+              role={onSelect ? 'button' : undefined}
+              tabIndex={onSelect ? 0 : undefined}
+              aria-label={onSelect ? `${question.no}번 문항 보기${answer ? ` (마킹: ${answer})` : ''}` : undefined}
+              title={onSelect ? '이 문항의 문제와 풀이 보기' : undefined}
+              onClick={onSelect ? () => onSelect(question.no) : undefined}
+              onKeyDown={onSelect ? event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(question.no) } } : undefined}
+              className={`flex items-center gap-1.5 rounded-md px-1.5 py-[3px] transition-colors ${active ? 'bg-amber-100 ring-1 ring-amber-300' : ''} ${onSelect ? 'cursor-pointer hover:bg-[var(--color-omr-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]' : ''}`}
             >
               <span className="w-6 text-right font-mono text-[0.7rem] font-bold tabular-nums text-[var(--color-ink)]">{question.no}</span>
               <span className="flex flex-1 items-center gap-[5px] min-w-0">
