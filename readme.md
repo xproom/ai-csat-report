@@ -45,7 +45,7 @@ cd web; npm ci; npm run dev
 - `lib/schema.js` 평가지·풀이 데이터 형식, `lib/grading.js` 채점, `lib/aiRunner.js` Claude 호출, `lib/db.js` IndexedDB
 - `components/PaperCover.jsx` 표지, `components/OmrCard.jsx` OMR 답안지, `components/RunPanel.jsx` 풀이 추가
 - `lib/liveSolve.js` 문항별 실시간 풀이(스트리밍·시각 기록), `lib/replay.js` 재생 상태 계산, `components/SolveViewer.jsx` AI 풀이 보기 화면, `components/CompactOmr.jsx` 세로형 OMR, `components/GradeSheet.jsx` 채점 완료 화면
-- `pages/` 홈, 새 평가지(3단계), 평가지 상세(표지·문제지·정답·OMR·AI 풀이 보기·결과·성능 평가), 대시보드, 설정
+- `pages/` 홈, 새 평가지(표지 옵션 → 문제지·정답 → AI 풀어보기), 평가지 상세(표지·문제지·정답·OMR·AI 풀이 보기·결과·성능 평가), 대시보드, 설정
 
 ## 주의
 
