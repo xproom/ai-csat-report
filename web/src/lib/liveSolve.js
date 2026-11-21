@@ -18,7 +18,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { blobToBase64 } from './db.js'
 import { normalizeChoice } from './grading.js'
 import { makeId, QUESTION_TYPES } from './schema.js'
-import { CLAUDE_MODELS } from './aiRunner.js'
+import { CLAUDE_MODELS, MAX_REQUEST_BYTES, describeApiError, estimateRequestBytes } from './aiRunner.js'
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const MAX_THINK_CHARS = 700
@@ -124,16 +124,17 @@ function createThinkCollector(emit) {
  * @brief 한 문항 실시간 풀이
  * @returns {Promise<{ answer, status, page, durationMs, inputTokens, outputTokens, cacheReadTokens }>}
  */
-async function solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit }) {
+async function solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat }) {
   const request = {
     model: modelInfo.id,
     max_tokens: 16000,
     system: LIVE_SYSTEM_PROMPT,
-    thinking: { type: 'adaptive', display: 'summarized' },
+    // 생각 요약을 자막으로 보여주기 위해 요청 (계정에서 받지 않으면 빼고 다시 시도)
+    thinking: compat.summarized ? { type: 'adaptive', display: 'summarized' } : { type: 'adaptive' },
     output_config: { effort },
     messages: [{ role: 'user', content: [...blocks, { type: 'text', text: questionPrompt(paper, question) }] }]
   }
-  const stream = modelInfo.fallback
+  const stream = compat.fallbacks
     ? client.beta.messages.stream({ ...request, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }, { signal })
     : client.messages.stream(request, { signal })
 
@@ -189,6 +190,9 @@ async function solveOne({ client, modelInfo, effort, blocks, paper, question, si
 export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, files, signal, onEvent }) {
   if (!apiKey) throw new Error('설정에서 Anthropic API 키를 먼저 입력하세요.')
   if (!files?.length) throw new Error('문제지 파일이 없습니다. 먼저 문제지를 업로드하세요.')
+  if (estimateRequestBytes(files) > MAX_REQUEST_BYTES) {
+    throw new Error(`문제지 파일이 너무 큽니다(약 ${(estimateRequestBytes(files) / 1048576).toFixed(0)}MB로 전송). 한 요청 한도(32MB)를 넘으니, 해당 과목 쪽만 남긴 PDF나 사진으로 다시 올려 주세요.`)
+  }
 
   const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
@@ -197,8 +201,13 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
   const trace = []
   const answers = {}
   const perQuestionMs = {}
+  const errors = {}
   const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+  // 계정에서 받지 않는 선택 기능은 400 오류가 나면 끄고 다시 시도
+  const compat = { fallbacks: modelInfo.fallback, summarized: true }
   let aborted = false
+  let fatalError = ''
+  let consecutiveFailures = 0
 
   for (const question of paper.questions) {
     if (signal?.aborted) { aborted = true; break }
@@ -209,19 +218,36 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
       onEvent?.(event)
     }
     emit('start')
-    try {
-      const result = await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit })
-      answers[question.no] = { answer: result.answer, status: result.status }
-      usage.inputTokens += result.inputTokens
-      usage.outputTokens += result.outputTokens
-      usage.cacheReadTokens += result.cacheReadTokens
-    } catch (error) {
-      if (signal?.aborted) { aborted = true; break }
-      answers[question.no] = { answer: '', status: 'no_answer' }
-      emit('step', `오류로 이 문항을 건너뜀: ${error?.message ?? '알 수 없는 오류'}`)
+    for (;;) {
+      try {
+        const result = await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat })
+        answers[question.no] = { answer: result.answer, status: result.status }
+        usage.inputTokens += result.inputTokens
+        usage.outputTokens += result.outputTokens
+        usage.cacheReadTokens += result.cacheReadTokens
+        consecutiveFailures = 0
+        break
+      } catch (error) {
+        if (signal?.aborted) { aborted = true; break }
+        const info = describeApiError(error)
+        if (info.status === 400 && (compat.fallbacks || compat.summarized)) {
+          if (compat.fallbacks) compat.fallbacks = false
+          else compat.summarized = false
+          emit('step', '일부 선택 기능 없이 다시 요청합니다.')
+          continue
+        }
+        answers[question.no] = { answer: '', status: 'no_answer' }
+        errors[question.no] = info.message
+        emit('step', `오류: ${info.message}`)
+        consecutiveFailures += 1
+        if (info.fatal) fatalError = info.message
+        else if (consecutiveFailures >= 3) fatalError = `${info.message} (3문항 연속 실패로 멈춤)`
+        break
+      }
     }
     perQuestionMs[question.no] = Math.round(performance.now() - questionStart)
     emit('end')
+    if (aborted || fatalError) break
   }
 
   for (const question of paper.questions) {
@@ -244,6 +270,8 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
     durationMs: Math.round(performance.now() - started),
     perQuestionMs,
     trace,
-    note: aborted ? '중간에 멈춰 일부 문항은 풀지 않았습니다.' : ''
+    errors,
+    fatalError,
+    note: fatalError ? `오류로 멈춤: ${fatalError}` : aborted ? '중간에 멈춰 일부 문항은 풀지 않았습니다.' : ''
   }
 }

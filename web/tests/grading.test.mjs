@@ -93,3 +93,17 @@ test('questionStats and leaderboard aggregate across runs', () => {
   assert.equal(board[0].model, 'A')
   assert.equal(board[0].papers, 1)
 })
+
+test('questions without an actual answer are not graded as wrong', () => {
+  const paper = samplePaper()
+  paper.questions[0].answer = ''
+  paper.questions[3].answer = ''
+  const run = { answers: { 1: { answer: '3', status: 'answered' }, 2: { answer: '1', status: 'answered' }, 4: { answer: '7', status: 'answered' } } }
+  const result = gradeRun(paper, run)
+  assert.equal(result.noKey, 2)
+  assert.equal(result.items[0].correct, null)
+  assert.equal(result.items[0].noKey, true)
+  assert.equal(result.items[3].correct, null)
+  assert.equal(result.items[1].correct, true)
+  assert.equal(result.correct, 1)
+})

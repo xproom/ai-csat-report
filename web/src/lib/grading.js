@@ -50,8 +50,8 @@ export function normalizeChoice(value) {
  * @brief 한 풀이 기록 채점
  * @returns {{
  *   score: number, maxScore: number, rate: number, correct: number, total: number,
- *   pendingEssays: number, invalid: number,
- *   items: Array<{ no, type, points, expected, given, status, correct: boolean|null, earned: number }>,
+ *   pendingEssays: number, invalid: number, noKey: number,
+ *   items: Array<{ no, type, points, expected, given, status, correct: boolean|null, earned: number, noKey: boolean }>,
  *   byType: Record<string, { earned: number, max: number }>
  * }}
  */
@@ -63,6 +63,7 @@ export function gradeRun(paper, run) {
   let correctCount = 0
   let pendingEssays = 0
   let invalid = 0
+  let noKeyCount = 0
 
   for (const question of paper.questions) {
     const points = Number(question.points) || 0
@@ -71,8 +72,13 @@ export function gradeRun(paper, run) {
     const status = entry?.status ?? (String(given).trim() ? 'answered' : 'no_answer')
     let correct = null
     let earned = 0
+    // 실제 정답이 없는 객관식·단답형은 맞고 틀림을 정할 수 없음 (0점, 채점 제외 표시)
+    const noKey = question.type !== 'essay' && !String(question.answer ?? '').trim()
 
-    if (status !== 'answered') {
+    if (noKey) {
+      noKeyCount += 1
+      if (status !== 'answered') invalid += 1
+    } else if (status !== 'answered') {
       invalid += 1
       correct = false
     } else if (question.type === 'choice') {
@@ -100,7 +106,7 @@ export function gradeRun(paper, run) {
     byType[question.type] ??= { earned: 0, max: 0 }
     byType[question.type].earned += earned
     byType[question.type].max += points
-    items.push({ no: question.no, type: question.type, points, expected: question.answer, given, status, correct, earned })
+    items.push({ no: question.no, type: question.type, points, expected: question.answer, given, status, correct, earned, noKey })
   }
 
   score = roundPoints(score)
@@ -118,6 +124,7 @@ export function gradeRun(paper, run) {
     total: paper.questions.length,
     pendingEssays,
     invalid,
+    noKey: noKeyCount,
     items,
     byType
   }

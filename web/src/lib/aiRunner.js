@@ -20,6 +20,42 @@ export const CLAUDE_MODELS = [
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
 
+/** 한 요청의 최대 크기(32MB)보다 조금 작게 잡은 문제지 크기 한도 (base64로 늘어나는 양 포함) */
+export const MAX_REQUEST_BYTES = 31 * 1024 * 1024
+
+/** @brief 문제지 파일을 base64로 보낼 때의 대략적인 요청 크기 */
+export function estimateRequestBytes(files) {
+  return files.reduce((sum, file) => sum + Math.ceil((file.size ?? file.blob?.size ?? 0) / 3) * 4, 0) + 20000
+}
+
+/** @brief API 오류 본문의 메시지 */
+function rawMessage(error) {
+  return error?.error?.error?.message || error?.error?.message || error?.message || String(error ?? '알 수 없는 오류')
+}
+
+/**
+ * @brief API 오류를 사용자가 이해할 수 있는 한국어 설명으로
+ * @returns {{ message: string, fatal: boolean, status: number|null }}
+ *   fatal이면 같은 설정으로 다른 문항을 풀어도 똑같이 실패하므로 풀이 전체를 멈춤
+ */
+export function describeApiError(error) {
+  const status = Number(error?.status) || null
+  const raw = rawMessage(error)
+  const lower = raw.toLowerCase()
+  if (!status) {
+    return { status, fatal: true, message: `Anthropic API에 연결하지 못했습니다. 인터넷 연결, 회사·학교 방화벽, 광고 차단 같은 브라우저 확장 프로그램이 api.anthropic.com 요청을 막는지 확인하세요. (${raw})` }
+  }
+  if (status === 401) return { status, fatal: true, message: `API 키가 올바르지 않습니다(401). 설정에서 키를 다시 확인하세요. (${raw})` }
+  if (status === 403) return { status, fatal: true, message: `이 API 키로는 요청이 허용되지 않습니다(403). 키의 권한이나 워크스페이스 설정을 확인하세요. (${raw})` }
+  if (status === 404) return { status, fatal: true, message: `모델을 찾을 수 없습니다(404). 이 계정에서 선택한 모델을 쓸 수 있는지 확인하고 다른 모델로 시도해 보세요. (${raw})` }
+  if (status === 413) return { status, fatal: true, message: `요청이 너무 큽니다(413). 문제지 파일이 한 요청 한도(32MB)를 넘습니다. 해당 과목 쪽만 남긴 PDF로 다시 올려 주세요. (${raw})` }
+  if (status === 400 && /credit|balance|billing/.test(lower)) return { status, fatal: true, message: `API 크레딧 잔액이 부족합니다(400). Anthropic 콘솔에서 결제 상태를 확인하세요. (${raw})` }
+  if (status === 400 && /pdf|page|document/.test(lower)) return { status, fatal: true, message: `문제지 PDF를 처리하지 못했습니다(400). 쪽 수가 너무 많거나 암호가 걸린 PDF일 수 있습니다. (${raw})` }
+  if (status === 400) return { status, fatal: true, message: `요청 형식 오류(400): ${raw}` }
+  if (status === 429) return { status, fatal: false, message: `요청 한도를 넘었습니다(429). 잠시 후 다시 시도하세요. (${raw})` }
+  return { status, fatal: false, message: `Anthropic 서버 오류(${status}). 잠시 후 다시 시도하세요. (${raw})` }
+}
+
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 
 const ANSWER_SCHEMA = {
@@ -86,6 +122,9 @@ async function fileToBlock(file) {
 export async function runClaudeOnPaper({ apiKey, model, effort = 'high', paper, files, signal }) {
   if (!apiKey) throw new Error('설정에서 Anthropic API 키를 먼저 입력하세요.')
   if (!files?.length) throw new Error('문제지 파일이 없습니다. 먼저 문제지를 업로드하세요.')
+  if (estimateRequestBytes(files) > MAX_REQUEST_BYTES) {
+    throw new Error('문제지 파일이 너무 큽니다. 한 요청 한도(32MB)를 넘으니, 해당 과목 쪽만 남긴 PDF나 사진으로 다시 올려 주세요.')
+  }
 
   const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
   const blocks = await Promise.all(files.map(fileToBlock))
@@ -142,13 +181,26 @@ async function callClaude({ apiKey, modelInfo, effort, system, content, signal }
     messages: [{ role: 'user', content }]
   }
 
-  // 안전 분류기가 거절하면 같은 요청을 다른 모델로 이어서 처리 (지원 모델만)
-  const response = modelInfo.fallback
-    ? await client.beta.messages.create(
-      { ...request, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' },
-      { signal }
-    )
-    : await client.messages.create(request, { signal })
+  // 안전 분류기가 거절하면 같은 요청을 다른 모델로 이어서 처리 (지원 모델만).
+  // 계정에서 이 선택 기능을 받지 않으면(400) 기능 없이 한 번 더 보냄.
+  let response
+  try {
+    response = modelInfo.fallback
+      ? await client.beta.messages.create(
+        { ...request, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' },
+        { signal }
+      )
+      : await client.messages.create(request, { signal })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    if (!(modelInfo.fallback && Number(error?.status) === 400)) throw new Error(describeApiError(error).message)
+    try {
+      response = await client.messages.create(request, { signal })
+    } catch (retryError) {
+      if (signal?.aborted) throw retryError
+      throw new Error(describeApiError(retryError).message)
+    }
+  }
 
   if (response.stop_reason === 'refusal') {
     throw new Error(`모델이 응답을 거절했습니다${response.stop_details?.category ? ` (${response.stop_details.category})` : ''}.`)

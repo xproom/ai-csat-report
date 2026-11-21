@@ -16,7 +16,7 @@ import { db } from '@/lib/db'
 import { gradeRun } from '@/lib/grading'
 import { runLiveSolve } from '@/lib/liveSolve'
 import { buildReplay, formatClock, formatDuration, stateAt } from '@/lib/replay'
-import { QUESTION_TYPES, paperTitle } from '@/lib/schema'
+import { QUESTION_TYPES, missingAnswers, paperTitle } from '@/lib/schema'
 import { getApiKey } from '@/lib/settings'
 import { useStore } from '@/lib/store'
 import CompactOmr from './CompactOmr'
@@ -52,6 +52,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   const liveRef = useRef({ lastT: 0, lastAt: 0, controller: null })
   const apiKey = getApiKey()
   const isLive = Boolean(live && !live.finished)
+  const missingKeys = missingAnswers(paper)
 
   const replay = useMemo(() => {
     if (live) return { events: live.events, totalMs: Number.POSITIVE_INFINITY, measured: true, live: true }
@@ -131,9 +132,16 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
           })
         }
       })
+      const answeredCount = Object.values(saved.answers).filter(entry => entry.status === 'answered').length
+      if (saved.fatalError && answeredCount === 0) {
+        // 한 문항도 풀지 못한 실패는 저장하지 않고 원인만 보여줌
+        setLive(prev => ({ ...(prev ?? { events: [], answers: {} }), error: saved.fatalError, finished: true }))
+        return
+      }
       await db.saveRun(saved)
       await refresh()
-      notify(saved.note ? `풀이를 멈췄습니다. 푼 문항까지 저장했습니다.` : `${saved.model} 풀이를 마쳤습니다.`)
+      if (saved.fatalError) notify(`오류로 멈췄습니다. 푼 ${answeredCount}문항까지 저장했습니다.`, 'error')
+      else notify(saved.note ? '풀이를 멈췄습니다. 푼 문항까지 저장했습니다.' : `${saved.model} 풀이를 마쳤습니다.`)
       setLive(null)
       setRunId(saved.id)
       setClock(saved.durationMs)
@@ -235,9 +243,33 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
             {!apiKey && <> <a href="#/settings" className="font-bold underline">설정</a>에서 API 키를 먼저 입력하세요.</>}
             {apiKey && !files.length && <> 먼저 문제지 파일을 올려 주세요.</>}
           </p>
-          {live?.error && <p className="mt-2 text-sm text-[var(--color-pen)]">{live.error} <button type="button" className="underline" onClick={() => setLive(null)}>닫기</button></p>}
         </details>
       </div>
+
+      {/* 풀이 실패 원인 */}
+      {live?.error && (
+        <div role="alert" className="rounded-xl border border-[#f1c4c9] bg-[#fff5f6] px-4 py-3 text-sm text-[var(--color-pen)]">
+          <div className="font-bold">AI 풀이를 하지 못했습니다</div>
+          <p className="mt-1 break-words">{live.error}</p>
+          <button type="button" className="mt-2 text-xs font-semibold underline" onClick={() => setLive(null)}>닫기</button>
+        </div>
+      )}
+
+      {/* 저장된 풀이에 남은 오류 */}
+      {!live && run && (run.fatalError || Object.keys(run.errors ?? {}).length > 0) && (
+        <div className="rounded-xl border border-[#f1c4c9] bg-[#fff5f6] px-4 py-3 text-sm text-[var(--color-pen)]">
+          <div className="font-bold">이 풀이에는 오류로 풀지 못한 문항이 {Object.keys(run.errors ?? {}).length || '일부'}개 있습니다</div>
+          <p className="mt-1 break-words">{run.fatalError || Object.values(run.errors)[0]}</p>
+        </div>
+      )}
+
+      {/* 실제 정답이 없으면 채점할 수 없음 */}
+      {missingKeys.length > 0 && (
+        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          실제 정답이 입력되지 않은 문항이 {missingKeys.length}개 있습니다({missingKeys.slice(0, 8).map(question => question.no).join(', ')}{missingKeys.length > 8 ? '…' : ''}번). 이 문항은 AI가 답을 내도 채점할 수 없어 ‘정답 없음’으로 표시됩니다.
+          {' '}<a className="font-bold underline" href={`#/paper/${paper.id}?tab=key`}>정답·배점</a>에서 실제 정답표를 올려 주세요.
+        </div>
+      )}
 
       {!run && !live ? (
         <div className="card px-6 py-14 text-center">

@@ -84,6 +84,12 @@ export default function GradeSheet({ paper, run, result, onReplay, onClose }) {
                   <span className="font-mono">{item.correct === null ? '채점 대기' : `${fmt(item.earned)}/${fmt(item.points)}점`}</span>
                   <span className="ml-auto font-black text-[var(--color-pen)]">{item.correct === null ? '·' : item.correct ? '○' : item.earned > 0 ? '△' : '✕'}</span>
                 </>
+              ) : item.noKey ? (
+                <>
+                  <span className="font-semibold">{item.status === 'answered' ? show(item.type, item.given) : '무응답'}</span>
+                  <span className="rounded bg-gray-100 px-1 text-[0.65rem] font-semibold text-gray-500">정답 없음</span>
+                  <span className="ml-auto font-black text-gray-400">·</span>
+                </>
               ) : (
                 <>
                   <span className={`font-semibold ${item.correct === false ? 'text-[var(--color-pen)] line-through decoration-1' : ''}`}>{item.status === 'answered' ? show(item.type, item.given) : '무응답'}</span>
@@ -96,7 +102,14 @@ export default function GradeSheet({ paper, run, result, onReplay, onClose }) {
         </div>
       </div>
 
-      {wrong.length === 0 && result.pendingEssays === 0 ? (
+      {result.noKey > 0 && (
+        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          실제 정답이 없는 {result.noKey}문항은 채점하지 못해 0점으로 계산했습니다.
+          {' '}<a className="font-bold underline" href={`#/paper/${paper.id}?tab=key`}>정답·배점</a>에서 실제 정답을 올리면 자동으로 다시 채점됩니다.
+        </div>
+      )}
+
+      {wrong.length === 0 && result.pendingEssays === 0 && result.noKey === 0 ? (
         <p className="text-center font-hand text-3xl text-[var(--color-pen)]">마킹까지, 전부 맞았다.</p>
       ) : (
         <p className="text-center text-sm text-[var(--color-ink-soft)]">
