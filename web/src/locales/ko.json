@@ -389,6 +389,8 @@
     "invalidRate": "무효 비율",
     "accuracy": "정답률",
     "validAccuracy": "유효 응답 정답률",
-    "validAccuracyHelp": "무효 응답을 뺀 문항만으로 계산한 정답률"
+    "validAccuracyHelp": "무효 응답을 뺀 문항만으로 계산한 정답률",
+    "gradeBelow": "{{grade}}등급 이하",
+    "partialNote": "수능 직후에는 상위 등급컷만 추정치로 공개됩니다. 공개된 마지막 등급컷보다 낮으면 \"N등급 이하\"로 표시하고, 이 경우 등급 합은 계산하지 않습니다. 확정 등급컷은 12월 성적 발표 후 반영됩니다."
   }
 }

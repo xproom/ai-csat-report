@@ -11,7 +11,8 @@ import { getExamInfo } from '@/config/examInfo'
 const CARD = 'bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 md:p-6'
 
 /** @brief 등급별 배지 색 */
-function _gradeClass(grade) {
+function _gradeClass(grade, below) {
+  if (grade == null && below != null) return 'bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-100'
   if (grade == null) return 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
   if (grade === 1) return 'bg-blue-600 text-white'
   if (grade === 2) return 'bg-blue-400 text-white dark:bg-blue-500'
@@ -25,8 +26,10 @@ function GradeCell({ item, label, t }) {
   if (!item) return <td className="px-2 py-2 text-center text-gray-400">—</td>
   return (
     <td className="px-2 py-2 text-center whitespace-nowrap">
-      <span className={`inline-flex min-w-[2.25rem] justify-center rounded-md px-1.5 py-0.5 text-sm font-bold ${_gradeClass(item.grade)}`}>
-        {item.grade == null ? '—' : t('grade.gradeValue', { grade: item.grade })}
+      <span className={`inline-flex min-w-[2.25rem] justify-center rounded-md px-1.5 py-0.5 text-sm font-bold ${_gradeClass(item.grade, item.below)}`}>
+        {item.grade != null
+          ? t('grade.gradeValue', { grade: item.grade })
+          : item.below != null ? t('grade.gradeBelow', { grade: item.below }) : '—'}
       </span>
       <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
         {item.raw}/{item.max}{label ? ` · ${label}` : ''}
@@ -89,6 +92,7 @@ export default function GradeReport({ data, models, exam }) {
               ? t('grade.cutSource', { source: examInfo.gradeCutSource || t('grade.sourceUnknown') })
               : t('grade.noCuts')}
           </p>
+          {hasCuts && <p className="mt-1">{t('grade.partialNote')}</p>}
         </div>
 
         {rows.length === 0 ? (

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { gradeFromCuts, buildGradeReport, getAnswerStatus } from '../src/utils/gradeTransform.js'
+import { gradeFromCuts, gradeInfo, buildGradeReport, getAnswerStatus } from '../src/utils/gradeTransform.js'
 import { applyQuickFilters } from '../src/utils/modelFilters.js'
 
 const exam = {
@@ -27,6 +27,15 @@ test('gradeFromCuts boundaries', () => {
   assert.equal(gradeFromCuts(20, cuts), 8)
   assert.equal(gradeFromCuts(19, cuts), 9)
   assert.equal(gradeFromCuts(50, undefined), null)
+})
+
+test('partial cuts give grade or "N등급 이하"', () => {
+  assert.equal(gradeFromCuts(85, [91, 85, 77]), 2)
+  assert.equal(gradeFromCuts(84, [91, 85, 77]), 3)
+  assert.equal(gradeFromCuts(70, [91, 85, 77]), null)
+  assert.deepEqual(gradeInfo(70, [91, 85, 77]), { grade: null, below: 4 })
+  assert.deepEqual(gradeInfo(48, [48]), { grade: 1, below: null })
+  assert.deepEqual(gradeInfo(45, [48]), { grade: null, below: 2 })
 })
 
 test('absolute grades for English and History, best elective and inquiry', () => {

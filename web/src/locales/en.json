@@ -391,6 +391,8 @@
     "invalidRate": "Invalid rate",
     "accuracy": "Accuracy",
     "validAccuracy": "Valid accuracy",
-    "validAccuracyHelp": "Accuracy over answered questions only"
+    "validAccuracyHelp": "Accuracy over answered questions only",
+    "gradeBelow": "G{{grade}}+",
+    "partialNote": "Right after the exam only top-grade cuts are estimated. Scores below the last published cut show as \"G N+\" and are excluded from the grade sum. Official cuts follow the December score release."
   }
 }

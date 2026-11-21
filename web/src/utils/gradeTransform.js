@@ -11,13 +11,33 @@ const ENGLISH_CUTS = [90, 80, 70, 60, 50, 40, 30, 20]
 /**
  * @brief 원점수와 등급컷 배열로 등급 계산
  * @param {number} raw - 원점수
- * @param {number[]|undefined} cuts - [1등급컷 … 8등급컷]
- * @returns {number|null} 1~9 등급, 등급컷이 없으면 null
+ * @param {number[]|undefined} cuts - [1등급컷, 2등급컷, …] (1~8개, 일부 등급만 있어도 됨)
+ * @returns {number|null} 1~9 등급. 등급컷이 없거나, 일부 등급컷만 있고 그보다 낮으면 null
  */
 export function gradeFromCuts(raw, cuts) {
-  if (!Array.isArray(cuts) || cuts.length !== 8 || raw == null) return null
+  if (!Array.isArray(cuts) || cuts.length === 0 || raw == null) return null
   const index = cuts.findIndex(cut => raw >= cut)
-  return index === -1 ? 9 : index + 1
+  if (index !== -1) return index + 1
+  return cuts.length >= 8 ? 9 : null
+}
+
+/**
+ * @brief 등급과 "N등급 이하" 하한 정보를 함께 계산
+ * @returns {{ grade: number|null, below: number|null }} below는 공개된 마지막 등급컷보다 낮을 때의 등급 하한
+ */
+export function gradeInfo(raw, cuts) {
+  const grade = gradeFromCuts(raw, cuts)
+  const below = grade == null && Array.isArray(cuts) && cuts.length > 0 && cuts.length < 8 && raw != null
+    ? cuts.length + 1
+    : null
+  return { grade, below }
+}
+
+/** @brief 정렬용 등급 값 (하한만 아는 경우 그보다 약간 나쁘게, 정보 없으면 맨 뒤) */
+function _sortGrade(item) {
+  if (item.grade != null) return item.grade
+  if (item.below != null) return item.below + 0.5
+  return 10
 }
 
 /**
@@ -58,13 +78,13 @@ function _bestCombo(rowsByTarget, sections, gradeCuts) {
         elective: elective.section,
         raw,
         max: commonRow.total_points + row.total_points,
-        grade: gradeFromCuts(raw, gradeCuts[elective.target])
+        ...gradeInfo(raw, gradeCuts[elective.target])
       }
     })
     .filter(Boolean)
 
   if (combos.length === 0) return null
-  combos.sort((a, b) => (a.grade ?? 10) - (b.grade ?? 10) || b.raw - a.raw)
+  combos.sort((a, b) => _sortGrade(a) - _sortGrade(b) || b.raw - a.raw)
   return { ...combos[0], combos }
 }
 
@@ -72,7 +92,7 @@ function _bestCombo(rowsByTarget, sections, gradeCuts) {
 function _single(rowsByTarget, sections, cuts) {
   const row = sections?.[0] ? rowsByTarget[sections[0].target] : null
   if (!row) return null
-  return { raw: row.score, max: row.total_points, grade: gradeFromCuts(row.score, cuts) }
+  return { raw: row.score, max: row.total_points, ...gradeInfo(row.score, cuts) }
 }
 
 /** @brief 탐구 상위 2과목 선택 */
@@ -85,11 +105,11 @@ function _bestInquiry(rowsByTarget, sections, gradeCuts) {
         subject: section.section === '탐구' ? section.subject : section.section,
         raw: row.score,
         max: row.total_points,
-        grade: gradeFromCuts(row.score, gradeCuts[section.target])
+        ...gradeInfo(row.score, gradeCuts[section.target])
       }
     })
     .filter(Boolean)
-  results.sort((a, b) => (a.grade ?? 10) - (b.grade ?? 10) || b.raw / b.max - a.raw / a.max)
+  results.sort((a, b) => _sortGrade(a) - _sortGrade(b) || b.raw / b.max - a.raw / a.max)
   return results.slice(0, 2)
 }
 
@@ -164,5 +184,5 @@ export function buildGradeReport(data, models, exam, examInfo) {
 
 /** @brief 등급컷이 하나라도 입력된 상대평가 과목이 있는지 */
 export function hasRelativeGradeCuts(examInfo) {
-  return Object.values(examInfo?.gradeCuts || {}).some(cuts => Array.isArray(cuts) && cuts.length === 8)
+  return Object.values(examInfo?.gradeCuts || {}).some(cuts => Array.isArray(cuts) && cuts.length > 0)
 }
