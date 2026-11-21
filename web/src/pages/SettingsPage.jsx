@@ -1,0 +1,126 @@
+/**
+ * @file SettingsPage.jsx
+ * @brief API 키, 데이터 백업·복원·초기화, 예시 데이터
+ */
+
+import { useState } from 'react'
+import { db } from '@/lib/db'
+import { loadDemo } from '@/lib/demo'
+import { getApiKey, isKeyRemembered, setApiKey } from '@/lib/settings'
+import { useStore } from '@/lib/store'
+
+export default function SettingsPage() {
+  const { papers, runs, refresh, notify } = useStore()
+  const [key, setKey] = useState(getApiKey)
+  const [remember, setRemember] = useState(isKeyRemembered)
+  const [show, setShow] = useState(false)
+  const demoPapers = papers.filter(paper => paper.isDemo)
+
+  const saveKey = () => {
+    setApiKey(key.trim(), remember)
+    notify(key.trim() ? 'API 키를 저장했습니다.' : 'API 키를 지웠습니다.')
+  }
+
+  const exportBackup = async () => {
+    const backup = await db.exportAll()
+    const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `ai-내신-성적표-백업-${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const importBackup = async file => {
+    try {
+      const result = await db.importAll(JSON.parse(await file.text()))
+      await refresh()
+      notify(`평가지 ${result.papers}개, 풀이 ${result.runs}개를 복원했습니다.`)
+    } catch (error) {
+      notify(error?.message || '복원하지 못했습니다.', 'error')
+    }
+  }
+
+  const removeDemo = async () => {
+    for (const paper of demoPapers) await db.deletePaper(paper.id)
+    await refresh()
+    notify('예시 데이터를 지웠습니다.')
+  }
+
+  const resetAll = async () => {
+    if (!window.confirm(`평가지 ${papers.length}개와 풀이 기록 ${runs.length}개, 문제지 파일을 모두 지웁니다. 되돌릴 수 없습니다. 먼저 백업하는 것을 권장합니다.`)) return
+    await db.clearAll()
+    await refresh()
+    notify('모든 데이터를 지웠습니다.')
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">설정</h1>
+        <p className="mt-1 text-[var(--color-ink-soft)]">모든 데이터는 이 브라우저(IndexedDB)에만 저장됩니다.</p>
+      </div>
+
+      <section className="card p-4 sm:p-6 space-y-4">
+        <div>
+          <h2 className="text-lg font-extrabold">Anthropic API 키</h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)] leading-relaxed">
+            Claude로 문제지를 풀 때 사용합니다. 요청은 이 브라우저에서 Anthropic API로 바로 가며, 이 서비스의 서버를 거치지 않습니다.
+            키는 <a className="underline" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Anthropic 콘솔</a>에서 발급할 수 있습니다.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <input
+            className="input flex-1 min-w-[14rem] font-mono"
+            type={show ? 'text' : 'password'}
+            value={key}
+            onChange={e => setKey(e.target.value)}
+            placeholder="sk-ant-…"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Anthropic API 키"
+          />
+          <button type="button" className="btn btn-ghost" onClick={() => setShow(!show)}>{show ? '숨기기' : '보기'}</button>
+          <button type="button" className="btn btn-primary" onClick={saveKey}>저장</button>
+        </div>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-1" checked={remember} onChange={e => setRemember(e.target.checked)} />
+          <span>
+            이 브라우저에 기억하기
+            <span className="block text-xs text-[var(--color-ink-soft)]">끄면 탭을 닫을 때 키가 지워집니다. 공용 컴퓨터에서는 끄세요. 사용 한도를 정한 전용 키를 쓰는 것을 권장합니다.</span>
+          </span>
+        </label>
+      </section>
+
+      <section className="card p-4 sm:p-6 space-y-4">
+        <div>
+          <h2 className="text-lg font-extrabold">데이터 백업</h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">평가지 {papers.length}개 · 풀이 기록 {runs.length}개. 다른 기기로 옮기거나 보관하려면 백업 파일을 내려받으세요(문제지 파일 포함).</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn btn-primary" onClick={exportBackup} disabled={!papers.length}>백업 내려받기</button>
+          <label className="btn btn-ghost">
+            백업 파일로 복원
+            <input type="file" accept="application/json,.json" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) importBackup(file); e.target.value = '' }} />
+          </label>
+        </div>
+      </section>
+
+      <section className="card p-4 sm:p-6 space-y-4">
+        <h2 className="text-lg font-extrabold">예시 데이터</h2>
+        <p className="text-sm text-[var(--color-ink-soft)]">화면을 둘러보기 위한 평가지 3개와 가상 모델 점수입니다. 실제 AI 성능이 아닙니다.</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn btn-ghost" onClick={() => loadDemo(refresh, notify)}>예시 데이터 불러오기</button>
+          <button type="button" className="btn btn-ghost" disabled={!demoPapers.length} onClick={removeDemo}>예시 데이터 지우기 ({demoPapers.length})</button>
+        </div>
+      </section>
+
+      <section className="card p-4 sm:p-6 space-y-3 border-[#f1c4c9]">
+        <h2 className="text-lg font-extrabold text-[var(--color-pen)]">전체 초기화</h2>
+        <p className="text-sm text-[var(--color-ink-soft)]">이 브라우저에 저장된 평가지, 문제지 파일, 풀이 기록을 모두 지웁니다.</p>
+        <button type="button" className="btn btn-danger" onClick={resetAll} disabled={!papers.length && !runs.length}>모두 지우기</button>
+      </section>
+    </div>
+  )
+}

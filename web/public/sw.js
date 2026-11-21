@@ -1,82 +1,34 @@
 /**
  * @file sw.js
- * @brief 서비스 워커 - 기본 캐싱 전략
+ * @brief 서비스 워커 - 앱 셸만 캐시하고, 이전 버전 캐시는 정리
+ * @note 사용자 데이터는 IndexedDB에 있으므로 여기서 다루지 않습니다.
  */
+const CACHE_NAME = 'exam-bench-v1'
+const BASE_PATH = new URL(self.registration.scope).pathname
 
-const CACHE_NAME = 'ai-csat-report-v1'
-const BASE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, '')
-
-// 캐시할 정적 에셋
-const STATIC_ASSETS = [
-  `${BASE_PATH}/`,
-  `${BASE_PATH}/index.html`,
-  `${BASE_PATH}/benchmarks.json`,
-  `${BASE_PATH}/model_metadata.json`,
-  `${BASE_PATH}/all_results.json`,
-  `${BASE_PATH}/token_usage.json`
-]
-
-/**
- * @brief 설치 이벤트 - 정적 에셋 캐시
- */
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
-        return cache.addAll(STATIC_ASSETS)
-      })
-      .then(() => {
-        // 대기 중인 서비스 워커 즉시 활성화
-        return self.skipWaiting()
-      })
-  )
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll([BASE_PATH])).then(() => self.skipWaiting()))
 })
 
-/**
- * @brief 활성화 이벤트 - 오래된 캐시 정리
- */
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((cacheNames) => {
-        return Promise.all(
-          cacheNames
-            .filter((name) => name !== CACHE_NAME)
-            .map((name) => caches.delete(name))
-        )
-      })
-      .then(() => {
-        // 모든 클라이언트 제어
-        return self.clients.claim()
-      })
+      .then((names) => Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name))))
+      .then(() => self.clients.claim())
   )
 })
 
-/**
- * @brief 페치 이벤트 - 네트워크 우선, 캐시 폴백
- */
+// 네트워크 우선, 실패 시 캐시 (같은 출처 GET만)
 self.addEventListener('fetch', (event) => {
-  // 같은 오리진 요청만 처리
-  if (!event.request.url.startsWith(self.location.origin)) {
-    return
-  }
-
+  const { request } = event
+  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return
   event.respondWith(
-    fetch(event.request)
+    fetch(request)
       .then((response) => {
-        // 성공적인 응답은 캐시에 저장
-        if (response.status === 200) {
-          const responseClone = response.clone()
-          caches.open(CACHE_NAME)
-            .then((cache) => {
-              cache.put(event.request, responseClone)
-            })
-        }
+        const copy = response.clone()
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
         return response
       })
-      .catch(() => {
-        // 네트워크 실패 시 캐시에서 반환
-        return caches.match(event.request)
-      })
+      .catch(() => caches.match(request))
   )
 })

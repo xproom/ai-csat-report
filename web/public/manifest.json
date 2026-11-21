@@ -1,12 +1,12 @@
 {
-  "name": "AI 수능 성적표",
-  "short_name": "AI 수능",
-  "description": "AI 모델의 수능 풀이 결과를 등급과 함께 보여주는 성적표",
+  "name": "AI 내신 성적표",
+  "short_name": "AI 내신",
+  "description": "초·중학교 중간·기말고사로 AI 모델의 실력을 평가하는 서비스",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#111827",
-  "theme_color": "#111827",
+  "background_color": "#f7f5f0",
+  "theme_color": "#1f3a5f",
   "orientation": "any",
   "lang": "ko",
   "icons": [

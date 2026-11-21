@@ -1,7 +1,7 @@
 name: Deploy to GitHub Pages
 
 # main에 올라올 때와 수동 실행 시에만 배포합니다.
-# (원본의 매시간 cron과 README 이미지 내보내기 단계는 제거했습니다)
+# 테스트 통과 후 web/ 앱을 빌드해 web/dist를 GitHub Pages에 올립니다.
 on:
   push:
     branches: [main]
@@ -43,24 +43,17 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm ci
 
-      # OPENROUTER_API_KEY 시크릿을 등록한 경우에만 처리 속도 정보를 갱신합니다.
-      - name: Refresh OpenRouter throughput snapshot
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        if: env.OPENROUTER_API_KEY != ''
-        run: node web/scripts/refresh-model-performance.mjs
-
       - name: Build site
         working-directory: web
         env:
           # 저장소 이름 경로로 배포 (https://<user>.github.io/<repo>/)
           VITE_BASE: /${{ github.event.repository.name }}/
-        run: npm run build:pages
+        run: npm test && npm run build
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: docs
+          path: web/dist
 
       - name: Deploy to GitHub Pages
         id: deployment

@@ -1,470 +1,52 @@
-# 2026 수능 LLM 풀이 기록
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/hehee9)
-
-**English version: [README_en.md](README_en.md)**
-
-<div align="center">
-
-### [**Interactive Dashboard**](https://hehee9.github.io/CSAT-benchmark/)
-
-[![Dashboard](https://img.shields.io/badge/Dashboard-Live-brightgreen?style=for-the-badge&logo=github)](https://hehee9.github.io/CSAT-benchmark/)
-
-**위 링크를 통해 모델별 점수, 과목별 정답률, 비용 분석을 보기 좋게 확인하실 수 있습니다**
-
-</div>
-
----
-
-## 개요
-
-다양한 LLM 모델의 수능 / 모의고사 문제 풀이 결과를 기록하고 통계를 정리한 데이터입니다.
-2026 대입 수능은 국어/수학 전과목, 영어, 한국사 영역과 더불어 비교적 어렵다는 평이 많은 탐구 과목 4개(생명1/물리1/화학1 및 사회문화)를 대상으로 테스트를 진행하였고
-이후 시험은 탐구까지 전과목을 대상으로 합니다.
-
-**전체 성적은 [대시보드](https://hehee9.github.io/CSAT-benchmark/)에서 확인**해주세요.
-
-섹션 묶음으로 실행한 2026학년도 기록은 대시보드의 **[일반](https://hehee9.github.io/CSAT-benchmark/?exam=csat-2026&mode=default&scoreBasis=normalized)** 모드에서, 문항별로 실행한 기록은 **[쉬움](https://hehee9.github.io/CSAT-benchmark/?exam=csat-2026&mode=easy&scoreBasis=normalized)** 모드에서 확인할 수 있습니다.
-
-직접 벤치마크를 실행하려면 [사용 가이드](guides/usage.md)를 참고하세요.
-
-**2026.04.25 기준 2026 수능 물리1 16/17번의 문제 이미지를 서로 반대로 첨부하고 있던 것을 확인해, 해당 두 문항만 전수 재시도 처리했습니다**
-
----
-
-## 주요 과목 종합 성적
-
-![2027 수능 주요 과목 총점 합 비교](https://hehee9.github.io/CSAT-benchmark/images/전체.png)
-
-> 📊 **평가 과목**: 국어, 수학, 영어, 한국사, 탐구(사회 탐구 9과목, 과학 탐구 8과목) (총 450점 만점)
->
-> 📝 **계산 방식**:
-> - 국어: 공통 + 선택과목(화법과 작문, 언어와 매체) 평균
-> - 수학: 공통 + 선택과목(확률과 통계, 미적분, 기하) 평균
-> - 영어, 한국사: 전체 점수
-> - 탐구: 2과목 선택으로 환산 (탐구 과목 평균 × 2)
-
-![2027 수능 총점 최고/최저 조합 비교](https://hehee9.github.io/CSAT-benchmark/images/최고_최저.png)
-
-> 📊 **평가 과목**: 위와 동일 (총 450점 만점)
->
-> 📝 **계산 방식**:
-> - 국어: 공통 + 선택과목(화법과 작문, 언어와 매체) 중 최고/최저점 택1
-> - 수학: 공통 + 선택과목(확률과 통계, 미적분, 기하) 중 최고/최저점 택1
-> - 영어, 한국사: 전체 점수
-> - 탐구: 대상 과목 중 최고/최저점 택2
-
-### 이미지 첨부 문제 vs 텍스트 문제 비교
-
-![2027 수능 이미지 있는 문제 득점률](https://hehee9.github.io/CSAT-benchmark/images/이미지O.png)
-
-![2027 수능 이미지 없는 문제 득점률](https://hehee9.github.io/CSAT-benchmark/images/이미지X.png)
-
-> 📊 **평가 범위**: 전체 과목 (국어, 수학, 영어, 한국사, 탐구)
->
-> 📝 **계산 방식**:
-> - 이미지 첨부 문제: 1개 이상의 이미지가 첨부된 문제들의 득점률 (실제 점수 / 만점 × 100%)
-> - 텍스트 문제: 이미지가 없는 문제들의 득점률 (실제 점수 / 만점 × 100%)
-> - 모든 과목과 영역의 점수를 통합하여 계산
-
----
-
-## 테스트 환경 및 주의사항
-
-**각 모델의 공식 API를 통해 진행되었습니다.**
-
-\* 단, GPT-5.5 Pro는 [커스텀 GPTs](https://chatgpt.com/g/g-69ecacbb8fac8191b0eb07e39c62496c-gpt-pro)를 통해 도구를 차단한 웹 환경에서 진행했습니다.
-
-### 테스트 환경
-- **실행 방식**: 각 모델의 공식 API를 통해 진행
-- **추론 설정**: 각 모델명 옆의 표기 참고
-- **시스템 프롬프트**: 별도의 시스템 프롬프트 제공하지 않음
-- **외부 도구**: 검색, 계산기 등 외부 도구를 **제공하지 않음**
-- 온도, Top P 등의 설정은 **기본값** 사용
-- **테스트 방법**: 순수하게 모델의 기본 능력만으로 문제 해결
-
-### 일반 사용자 환경과의 차이
-
-본 테스트 결과는 일반적인 공식 홈페이지/앱 사용 환경과 다를 수 있습니다:
-
-1. **시스템 프롬프트**: ChatGPT 공식 웹/앱에서는 모델에게 기본적인 시스템 프롬프트와 더불어 도구 사용법, 사용자 정보 등이 추가로 제공됩니다. 따라서 웹/앱에서 진행하면 같은 질문을 해도 사용자에 따라 결과가 크게 달라질 수 있습니다.
-1. **추론 예산 제한**: 일반 사용자 환경에서는 추론 예산이 제한되어 있어, 본 테스트보다 낮은 성능을 보일 수 있습니다.
-2. **출력 토큰 제한**: 일반 사용자 환경에서는 최대 출력 토큰이 제한되어 있어, 긴 추론 과정이 필요한 문제에서 답변이 잘릴 수 있습니다.
-3. **도구 미사용**: 일반 사용자 환경에서는 필요에 따라 웹 페이지 검색 등을 수행할 수 있으나, 본 테스트는 순수 모델의 지식만으로 답변했습니다.
-
-따라서 **공식 홈페이지나 앱에서와 성능에 차이가 있을 수 있습니다.**
-
-### 평가 방식
-
-- 각 LLM 모델에 문제 텍스트를 제시하고 답안 선택
-- 단답형 문항의 경우 정확한 숫자 입력 요구
-- 모델이 제시한 최종 답안을 정답과 비교하여 채점
-
-### 문제 제공 방식
-
-- **텍스트 추출**: PDF 파일을 OCR 등을 이용하여 텍스트로 변환하여 제공
-- **이미지 처리**: 문제에 포함된 이미지(그래프, 도표, 그림 등)만 별도로 캡처하여 제공
-- **원본 유지**: PDF 파일 자체나 전체 페이지 캡처는 제공하지 않음
-- 이는 모델이 순수하게 텍스트 이해 능력과 시각 자료 해석 능력을 활용하도록 하기 위함
-- **일반 모드**: 각 섹션(과목)의 모든 문제를 한 번에 풀이
-- **쉬움 모드**: 각 문제를 한 번씩 개별 풀이 (2026 수능에만 적용된 설정)
-
-기존의 고난도 모드는 일반 모드로, 일반 모드는 쉬움 모드로 변경되었습니다. LLM의 성능 상향 평준화에 따른 조치입니다.
-
----
-
-## 테스트 모델
-
-- **OpenAI GPT 시리즈**
-  - GPT-6.2 Astra (high)
-  - GPT-6.2 Sol (high)
-  - GPT-6.1 Sol (high / low)
-  - GPT-6.1 Terra (high / none)
-  - GPT-6 Astra (high / low)
-  - GPT-6 Sol (high / none)
-  - GPT-6 Luna (high / low / none)
-  - GPT-6 Luna Decisions
-  - GPT-5.6 Sol Pro (high)
-  - GPT-5.6 Sol (max* / high / none)
-  - GPT-5.6 Terra Pro (high)
-  - GPT-5.6 Terra (max* / high / none)
-  - GPT-5.6 Luna Pro (high)
-  - GPT-5.6 Luna (max* / high / low / none)
-  - GPT-5.5 Pro (xhigh, GPTs)
-  - GPT-5.5 (xhigh* / high / none)
-  - GPT-5.5 Instant
-  - GPT-5.4 (xhigh* / high / none)
-  - GPT-5.4 mini (xhigh / none)
-  - GPT-5.4 nano (xhigh / none)
-  - GPT-5.2 (xhigh / Instant)
-  - GPT-5.1 (high)
-  - GPT-5.1 Codex (high)
-  - GPT-5.1 Chat
-  - GPT-5 mini (high)
-  - GPT-5 nano (high)
-  - o1 / o3 (high)
-  - o3-mini / o4-mini (high)
-  - GPT-4.1
-  - GPT-4.1 mini
-  - GPT-4.1 nano
-  - GPT-4o (2024-11-20)
-  - GPT-4o mini
-  - GPT-OSS 120B (high) (via Fireworks AI)
-
-- **Google Gemini 시리즈**
-  - Gemini 4 Argon (high / low)
-  - Gemini Decision 1
-  - Gemini 3.8 Flash (high / low)
-  - Gemini 3.7 Flash (high / low)
-  - Gemini 3.6 Flash (high / minimal)
-  - Gemini 3.5 Flash (high / minimal)
-  - Gemini 3.5 Flash-Lite (high / minimal)
-  - Gemini 3.1 Pro (high / low)
-  - Gemini 3.1 Flash-Lite (high / minimal)
-  - Gemini 3 Pro (high / low)
-  - Gemini 3 Flash (high / minimal)
-  - Gemini 2.5 Pro (32K Thinking)
-  - Gemini 2.5 Flash (2025-09 Preview, 24K Thinking / Non-Thinking)
-  - Gemini 2.5 Flash-Lite (2025-09 Preview, 24K Thinking / Non-Thinking)
-  - Gemini 2.0 Flash
-  - Gemini 2.0 Flash-Lite
-
-- **Google Gemma 시리즈**
-  - Gemma 4 31B (high / minimal)
-  - Gemma 4 26B A4B (high / minimal)
-  - Gemma 4 E4B (high)
-  - Gemma 4 E2B (high)
-
-- **Anthropic Claude 시리즈**
-  - Claude Fable 5.1 (high)
-  - Claude Fable 5 (high)
-  - Claude Opus 5 (high / none)
-  - Claude Sonnet 5 (high / none)
-  - Claude Opus 4.8 (high / none)
-  - Claude Opus 4.7 (max* / high / none)
-  - Claude Sonnet 4.6 (high / none)
-  - Claude Opus 4.5 (32K Thinking / Non-Thinking)
-  - Claude Sonnet 4.5 (32K Thinking / Non-Thinking)
-  - Claude Haiku 4.5 (32K Thinking / Non-Thinking)
-
-- **xAI Grok 시리즈**
-  - Grok 4.5 (high)
-  - Grok 4.3 (Thinking / Non-Thinking)
-  - Grok 4.1 Fast (Thinking / Non-Thinking)
-  - Grok 4 Fast (Thinking)
-  - Grok 4
-
-- **Meta Muse Spark 시리즈**
-  - Muse Spark 1.3 (minimal / high)
-  - Muse Spark 1.2 (minimal / high)
-
-- **Mistral 시리즈**
-  - Mistral Small 4 (Thinking / Non-Thinking)
-
-- **DeepSeek 시리즈**
-  - DeepSeek V4.1 Flash 1017 (high)
-  - DeepSeek V4.1 Flash (high)
-  - DeepSeek V4 Flash Vision Exp (none / max)
-  - DeepSeek V4 Flash 0731 (none / max)
-  - DeepSeek V4 Flash (none / max)
-  - DeepSeek V4 Pro 0813 (max / none)
-  - DeepSeek V4 Pro (none / max)
-  - DeepSeek V3.2 Speciale
-  - DeepSeek V3.2 (Thinking)
-  - DeepSeek V3.2 (Non-Thinking)
-  - DeepSeek V3.2 Exp (Thinking)
-  - DeepSeek V3.2 Exp (Non-Thinking)
-
-- **Moonshot AI Kimi 시리즈**
-  - Kimi K3.1 Pro (high)
-  - Kimi K2.6 (Thinking / Non-Thinking)
-  - Kimi K2.5 (Thinking / Non-Thinking)
-
-- **MiniMax 시리즈**
-  - MiniMax M3.1 Flash (high)
-  - MiniMax M3 (Thinking / Non-Thinking)
-
-- **Z.ai GLM 시리즈**
-  - GLM-5.3 Flash (high)
-  - GLM-5.2 (Thinking / Non-Thinking)
-  - GLM-5.1 (Thinking / Non-Thinking)
-  - GLM-5 (Thinking / Non-Thinking)
-
-- **Alibaba Cloud Qwen 시리즈**
-  - Qwen4 Max (high)
-  - Qwen3.8 Max (xhigh)
-  - Qwen3.8 27B (xhigh)
-  - Qwen3.8 Flash (xhigh)
-  - Qwen3.7 Max (Thinking / Non-Thinking)
-  - Qwen3.6 Plus (Thinking / Non-Thinking)
-  - Qwen3.6 27B (Thinking / Non-Thinking)
-  - Qwen3.5 397B (Thinking / Non-Thinking)
-  - Qwen3.5 35B A3B (Thinking / Non-Thinking)
-  - Qwen3.5 27B (Thinking / Non-Thinking)
-  - Qwen3.5 9B (Thinking / Non-Thinking)
-
-- **LGAI EXAONE 시리즈**
-  - K-EXAONE 2.5 (high)
-  - K-EXAONE 2.0 (Thinking / Non-Thinking)
-  - K-EXAONE (Thinking / Non-Thinking)
-
-- **Kakao Kanana 시리즈**
-  - Kanana-o 9.8B
-
-- **Upstage Solar 시리즈**
-  - Solar Mini 4.5 Preview (max)
-  - Solar Pro 4 (none / max)
-  - Solar Mini 4 (none / max)
-  - Solar Decide
-  - Solar Pro 3 0126 (high / low)
-  - Solar Pro 3 (high / low)
-
-- **Motif 시리즈**
-  - Motif 3 (Thinking / Non-Thinking)
-  - Motif 12.7B (Thinking)
-
-- **KRAFTON Raon 시리즈**
-  - Raon-1 mini preview
-
-- **KT Mi:dm 시리즈**
-  - Mi:dm K 3.0 Pro
-
-- **Typesafe Jev 시리즈**
-  - Jev 1.14
-  - Jev 1.13
-
-\* 틀린 문항만 더 높은 추론으로 재측정한 것입니다. 성능 향상에 비해 들어가는 시간과 비용이 너무 커져 이 방식으로 처리한 점 양해 바랍니다.
-
-※ 이미지 인식이 불가능한 모델은 텍스트로만 진행했습니다.
-
----
-
-## 국어 영역
-
-### 2027 수능 (100점 만점)
-
-![국어 (2027 수능)](https://hehee9.github.io/CSAT-benchmark/images/국어.png)
-
----
-
-## 수학 영역
-
-### 2027 수능 (100점 만점)
-
-![수학 (2027 수능)](https://hehee9.github.io/CSAT-benchmark/images/수학.png)
-
----
-
-## 영어 영역
-
-### 2027 수능 (100점 만점)
-![영어 (2027 수능)](https://hehee9.github.io/CSAT-benchmark/images/영어.png)
-
----
-
-## 한국사 영역
-
-### 2027 수능 (50점 만점)
-![한국사 (2027 수능)](https://hehee9.github.io/CSAT-benchmark/images/한국사.png)
-
----
-
-## 탐구 영역
-
-### 물리1
-
-![물리1 (2027 수능)](https://hehee9.github.io/CSAT-benchmark/images/물리1.png)
-
-### 화학1
-
-![화학1 (2027 수능)](https://hehee9.github.io/CSAT-benchmark/images/화학1.png)
-
-### 생명과학1
-
-![생명1 (2027 수능)](https://hehee9.github.io/CSAT-benchmark/images/생명1.png)
-
-### 사회문화
-
-![사회문화 (2027 수능)](https://hehee9.github.io/CSAT-benchmark/images/사회문화.png)
-
----
-
-## 비용 효율성
-
-API 비용(토큰 사용량)과 점수 간의 상관관계를 분석한 결과입니다.
-
-### 비용 vs 성능
-
-![비용 효율성](https://hehee9.github.io/CSAT-benchmark/images/비용_분석.png)
-
-공식 공급자가 없는 모델의 경우, OpenRouter의 평균적인 비용을 바탕으로 측정했습니다.
-
-| 모델명 | 입력 비용 | 출력 비용 |
-| :--- | :--- | :--- |
-| GPT-OSS 120B | 0.15 | 0.6 |
-| Gemma 4 31B | 0.14 | 0.4 |
-| Gemma 4 26B A4B | 0.1 | 0.4 |
-| Gemma 4 E4B | 0.1 | 0.2 |
-| Gemma 4 E2B | 0.04 | 0.08 |
-| Motif 12.7B (Thinking) | 0.1 | 0.2 |
-| Raon-1 mini preview | 0.1 | 0.4 |
-
-※ 1,000,000토큰 당 달러 기준입니다.
-
-※ 아직 유료 제공 API가 없는 경우는 비슷한 규모의 오픈 모델 유료 API 비용을 기준으로 삼았습니다.
-
-### 토큰 사용량
-
-![토큰 사용량](https://hehee9.github.io/CSAT-benchmark/images/토큰_사용량.png)
-
----
-
-## 평가 대상 상세
-
-### 2026 대입 수능
-
-- 국어 영역: 공통 34문항, 선택 과목 (화법과 작문, 언어와 매체) 각 11문항
-- 수학 영역: 공통 22문항, 선택 과목 (확률과 통계, 미적분, 기하) 각 8문항
-- 영어 영역: 45문항. 듣기 평가는 대본으로 대체
-- 한국사 영역: 20문항
-- 탐구 영역: 과학 탐구 (물리1, 화학1, 생명과학1) 및 사회 탐구 (사회문화) 각 20문항
-
-### 2027 9월 모의고사
-
-- 국어 영역: 공통 34문항, 선택 과목 (화법과 작문, 언어와 매체) 각 11문항
-- 수학 영역: 공통 22문항, 선택 과목 (확률과 통계, 미적분, 기하) 각 8문항
-- 영어 영역: 45문항. 듣기 평가는 대본으로 대체
-- 한국사 영역: 20문항
-- 사회 탐구: 경제, 동아시아사, 사회문화, 생활과윤리, 세계사, 세계지리, 윤리와사상, 정치와법, 한국지리
-- 과학 탐구: 물리1, 물리2, 화학1, 화학2, 생명1, 생명2, 지구1, 지구2
-\* 모의고사는 소수 모델로만 진행
-
-### 2027 대입 수능 (예정)
-
-- 국어·수학·영어·한국사와 탐구 17과목의 테스트를 준비 중입니다.
-- 사회 탐구: 경제, 동아시아사, 사회문화, 생활과윤리, 세계사, 세계지리, 윤리와사상, 정치와법, 한국지리
-- 과학 탐구: 물리1, 물리2, 화학1, 화학2, 생명1, 생명2, 지구1, 지구2
-
-## 평가 방법 상세
-
-OCR을 이용해 우선 문제를 텍스트로 추출한 후, 잘못 옮겨진 부분은 수작업으로 수정했습니다.
-지문 1개에 연계 문제가 있는 구조라면 '지문 + 해당 문제 개별 문제' 형식으로 입력됩니다. 즉, '지문 + 1번', '지문 + 2번', '지문 + 3번'처럼 지문은 중복 입력될 수 있습니다.
-
-수식은 LaTeX로 변환하여 입력해 식 자체를 잘못 이해하는 것을 방지했습니다. 이미지에서 텍스트를 인식하는 것 또한 성능 지표이긴 하지만, 문제를 잘못 인식해 틀리는 것은 본 프로젝트의 방향성에 맞지 않는다고 판단하였습니다.
-
-오류로 인해 응답을 아예 받지 못한 경우에만 재시도 하였으며, 다른 형태의 잘못된 응답은 모두 오답 처리 했습니다.
-
-### 입력 프롬프트 예시
-
-- 지문이 있는 경우 (2026 수능 국어 홀수형 3번 문항):
-````
-[1～3] 다음 글을 읽고 물음에 답하시오.
-
-```
- 글을 읽고 그 의미를 이해하는 독해에는 글의 유형이나 독서 흥미 등의 다양한 요소가 영향을 미칠 수 있다. ...제공했다는 의의가 있다.
+# AI 내신 성적표
+
+초·중학교 **중간고사·기말고사** 문제지로 AI 모델의 실력을 평가하는 웹 서비스입니다.
+문제지를 올리고 정답을 입력하면, AI가 문제를 풀고 결과를 **OMR 답안지**에 선생님 채점처럼 표시합니다.
+
+**사이트:** https://xproom.github.io/ai-csat-report/
+
+## 기능
+
+| 기능 | 설명 |
+|---|---|
+| 평가지별 옵션 표지 | 학교급·학년·학기·시험 종류·과목·학교명·시험 시간·유의사항·표지 테마(4종)를 고르면 실제 시험지 같은 표지가 만들어집니다. 목록에서는 표지 썸네일로 보입니다. |
+| 문제지 업로드 | PDF·사진(JPG/PNG/WebP)을 끌어다 놓아 올리고 바로 볼 수 있습니다. 문항 구성(객관식·단답형·서술형, 4/5지선다)과 정답·배점을 입력합니다. |
+| OMR 뷰어·채점 표시 | 문항 구성에 맞춘 OMR 답안지에 모델별 마킹을 보여주고, 정답은 빨간 동그라미, 오답은 빗금, 원래 정답 위치는 점선으로 표시합니다. 점수 도장, 단답·서술 답란 포함. OMR에 직접 마킹해 다른 AI 서비스나 학생 답을 기록할 수도 있습니다. |
+| 평가 결과 대시보드 | 모델 순위, 과목별 득점률 히트맵, 문항 유형별·학년별 득점률, 최근 풀이를 학교급·학년·과목·시험 종류로 걸러 봅니다. 평가지마다 문항별 정답률과 AI가 가장 많이 틀린 문항도 보여줍니다. |
+| AI 풀이 | 사용자 본인의 Anthropic API 키로 Claude(Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.2)가 문제지를 직접 풉니다. 다른 회사 모델 결과는 JSON 가져오기나 OMR 직접 입력으로 추가합니다. |
+| 서술형 채점 | 서술형은 자동 채점하지 않고, 답을 읽고 점수를 입력하면 총점에 반영됩니다. |
+| 백업 | 모든 데이터는 브라우저(IndexedDB)에만 저장됩니다. 설정에서 문제지 파일을 포함한 백업을 내려받고 복원할 수 있습니다. |
+
+## 결과 가져오기 형식
+
+```json
+[
+  { "model": "GPT-6.2", "answers": { "1": "3", "2": "5", "21": "12" } },
+  { "model": "Gemini 4", "answers": [{ "no": 1, "answer": "3" }] }
+]
 ```
 
-3. 윗글을 바탕으로 <보기>를 이해한 내용으로 적절하지 않은 것은? [3점]
-```
-<보기>
-단순 관점을 지지하는 연구자 갑은 학생 A, B의 독해 능력을 분석하기 위한 활동을 진행하였다. ...
-○ 소리 내어 단어 읽기: 학생 A는 활동 자료에 있는 단어를 빠르고 정확하게 ...
-○ 중심 내용 파악하기: 학생 A는 활동 자료를 글로 읽을 때와 말로 들을 때 모두 ...
+## 개발
+
+```powershell
+cd web; npm ci; npm run dev
 ```
 
-① 갑은 학생 A가 해독은 발달되었지만, ...
-② 갑은 학생 A가 글자와 글자 소리에 대한 학습을 통해 ...
-③ ...
-④ ...
-⑤ ...
-````
+- 테스트: `npm test` (채점·답 파싱·결과 가져오기)
+- 빌드: `npm run build` (배포 경로는 `VITE_BASE` 환경 변수, 기본 `/`)
+- `main`에 push하면 GitHub Actions가 테스트 후 GitHub Pages에 배포합니다.
 
-- 수식이 있는 경우 (2026 수능 수학 홀수형 15번 문항):
-````
-15. 함수 $f(x)$가
-$f(x) = \begin{cases} -x^2 & (x < 0) \\ x^2-x & (x \ge 0) \end{cases}$
-이고, 양수 a에 대하여 함수 $g(x)$를 ... $k+h(3)$의 값은? [4점]
+### 구조 (`web/src`)
 
-① $\frac{9}{2}$
-② $\frac{11}{2}$
-③ ...
-④ ...
-⑤ ...
-````
+- `lib/schema.js` 평가지·풀이 데이터 형식, `lib/grading.js` 채점, `lib/aiRunner.js` Claude 호출, `lib/db.js` IndexedDB
+- `components/PaperCover.jsx` 표지, `components/OmrCard.jsx` OMR 답안지, `components/RunPanel.jsx` 풀이 추가
+- `pages/` 홈, 새 평가지(3단계), 평가지 상세(표지·문제지·정답·OMR·결과), 대시보드, 설정
 
-- 이미지가 있는 경우 (2026 수능 한국사 홀수형 2번 문항):
-````
-2. 밑줄 친 '이 나라'에 대한 설명으로 옳은 것은?
-```
-[이미지: 02_01 (실제로 이미지를 첨부함)]
-> **寶曆(보력) 慶雲(경운)**
-유물은 고구려를 계승한 *이 나라* 제3대 왕 문왕의 배우자인 ... 고구려 후기 양식을 이어받은 것이다.
-```
+## 주의
 
-① 골품제를 실시하였다.
-② 평양으로 천도하였다.
-③ ...
-④ ...
-⑤ ...
-````
+- AI 풀이 요청은 브라우저에서 Anthropic API로 바로 갑니다. API 키는 이 브라우저에만 저장되며, 사용 한도를 정한 전용 키를 권장합니다.
+- 학교 시험 문제지의 저작권은 출제 학교·교사에게 있습니다. 이 서비스는 문제지를 서버에 올리지 않습니다.
 
----
+## 출처
 
-## 라이선스 및 저작권
-
-### 프로젝트 라이선스
-
-본 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE.md) 파일을 참조하세요.
-
-### 수능 문제 저작권
-
-- 2026학년도 대학수학능력시험 문제는 **한국교육과정평가원**의 저작물입니다.
-- 본 저장소는 문제 원본을 포함하지 않습니다.
-- 엑셀 파일은 문항 번호와 정답만 포함하며, 전체 문제 텍스트는 저작권 문제로 제공하지 않습니다.
-- 수능 문제를 활용하시려면 한국교육과정평가원의 공식 자료를 이용하시기 바랍니다.
-
----
-
-* 연락처: gyugyum@gmail.com
+[hehee9/CSAT-benchmark](https://github.com/hehee9/CSAT-benchmark)(MIT)를 포크해 시작했습니다. 저장소 루트의 Python 패키지(`csat_benchmark/`)와 데이터(`published/`, `benchmarks/`)는 원본의 수능 벤치마크 파이프라인으로, 현재 웹 서비스에서는 쓰지 않습니다. 라이선스는 `LICENSE.md`를 따릅니다.
