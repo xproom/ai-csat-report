@@ -3,6 +3,7 @@
  * @brief 상단 헤더, 모바일 하단 탭, 알림 토스트
  */
 
+import { setGuest } from '@/lib/cloud'
 import { useStore } from '@/lib/store'
 
 const NAV = [
@@ -42,9 +43,13 @@ function isActive(current, path) {
   return current.startsWith(path)
 }
 
+const ADMIN_NAV = { path: '/admin', label: '사용자 관리', icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a8 8 0 0116 0M19 8v6M22 11h-6' }
+
 export default function Layout({ route, children }) {
-  const { toast, cloud } = useStore()
+  const { toast, cloud, setGuestMode } = useStore()
   const current = route.path
+  const nav = cloud.profile?.role === 'admin' && !cloud.guest ? [...NAV.slice(0, 3), ADMIN_NAV, NAV[3]] : NAV
+  const leaveGuest = () => { setGuest(false); setGuestMode(false) }
 
   return (
     <div className="min-h-dvh flex flex-col">
@@ -52,7 +57,7 @@ export default function Layout({ route, children }) {
         <div className="mx-auto max-w-6xl px-4 h-16 flex items-center justify-between gap-4">
           <Logo />
           <nav className="hidden md:flex items-center gap-1" aria-label="주 메뉴">
-            {NAV.map(item => (
+            {nav.map(item => (
               <a
                 key={item.path}
                 href={`#${item.path}`}
@@ -68,6 +73,15 @@ export default function Layout({ route, children }) {
         </div>
       </header>
 
+      {cloud.configured && cloud.guest && (
+        <div className="bg-amber-50 border-b border-amber-200">
+          <div className="mx-auto max-w-6xl px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="text-amber-900 break-keep"><b>둘러보기 모드</b> · 자료는 이 브라우저에만 저장되고 서버에는 올라가지 않습니다.</span>
+            <button type="button" className="font-bold text-[var(--color-brand)] hover:underline" onClick={leaveGuest}>로그인하기 →</button>
+          </div>
+        </div>
+      )}
+
       <main className="flex-1 mx-auto w-full max-w-6xl px-4 py-6 md:py-10 pb-28 md:pb-12">{children}</main>
 
       <footer className="hidden md:block border-t border-[var(--color-line)] py-6 text-center text-xs text-[var(--color-ink-soft)]">
@@ -75,8 +89,8 @@ export default function Layout({ route, children }) {
       </footer>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-[var(--color-line)] pb-[env(safe-area-inset-bottom)]" aria-label="하단 메뉴">
-        <div className="grid grid-cols-4">
-          {NAV.map(item => (
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
+          {nav.map(item => (
             <a
               key={item.path}
               href={`#${item.path}`}

@@ -37,7 +37,15 @@
 4. 연결 정보(Project URL, anon/publishable 키)를 넣습니다. 둘 중 하나를 고르세요.
    - 사이트 전체에 연결: GitHub 저장소 Settings → Secrets and variables → Actions → **Variables**에 `SUPABASE_URL`, `SUPABASE_ANON_KEY`를 만들고 다시 배포
    - 브라우저마다 연결: 사이트의 설정 → 중앙 서버에 입력
-5. 설정 화면에서 이메일 로그인 링크로 로그인하고, 필요하면 「이 브라우저 자료 서버로 올리기」를 누릅니다.
+5. SQL Editor에서 [`supabase/002_profiles.sql`](supabase/002_profiles.sql)을 실행하고, 파일 맨 아래 주석처럼 첫 관리자를 지정합니다.
+6. 사이트 첫 화면(로그인 창)에서 이메일 로그인 링크나 Google로 로그인합니다. 처음 로그인한 교사는 가입 신청 후 **관리자가 「사용자 관리」에서 승인**해야 이용할 수 있습니다.
+
+### 로그인과 접근 권한
+
+- 첫 화면은 로그인 창입니다. 로그인 없이 「예시로 둘러보기」는 이 브라우저에만 저장됩니다.
+- 이메일 로그인: 메일의 링크를 연 브라우저에서 로그인됩니다. 직접 메일 서버(SMTP)를 연결해 메일 템플릿에 `{{ .Token }}`을 넣으면 6자리 인증번호 입력으로도 로그인할 수 있습니다.
+- Google 로그인: Google Cloud에서 OAuth 클라이언트(웹)를 만들고 승인된 리디렉션 URI에 `https://<프로젝트>.supabase.co/auth/v1/callback`을 넣은 뒤, Supabase Authentication → Sign In / Providers → Google에 클라이언트 ID·보안 비밀을 넣으면 로그인 창에 버튼이 나타납니다.
+- 서버 규칙(RLS)이 **승인된 교사 본인 자료만** 읽고 쓰게 막습니다. 권한·승인 상태는 관리자만 바꿀 수 있습니다.
 
 교사마다 본인 자료만 읽고 쓸 수 있습니다 (`owner_id = auth.uid()`). service_role 키는 사이트에 넣지 마세요. Anthropic API 키는 서버에 저장하지 않습니다.
 

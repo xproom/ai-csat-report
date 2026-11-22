@@ -42,8 +42,9 @@ export function getSupabase() {
   if (client) return client
   const config = getCloudConfig()
   if (!config) return null
+  // implicit: 메일의 로그인 링크를 어느 브라우저에서 열어도 그 브라우저에서 로그인됨 (pkce는 요청한 브라우저에서만 됨)
   client = createClient(config.url, config.anonKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'pkce' }
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit' }
   })
   return client
 }
@@ -76,6 +77,84 @@ export async function sendLoginLink(email) {
 export async function signOut() {
   await getSupabase()?.auth.signOut()
 }
+
+/* ───────────── 로그인 (이메일 6자리 인증번호 · Google) ───────────── */
+
+const siteUrl = () => `${window.location.origin}${window.location.pathname}`
+
+/**
+ * @brief 로그인 인증번호(6자리)를 이메일로 보냄 - 메일의 링크를 눌러도 로그인됨
+ * - 처음 쓰는 이메일이면 계정이 만들어지고 '승인 대기' 상태가 됨
+ */
+export async function sendLoginCode(email) {
+  const supabase = getSupabase()
+  if (!supabase) throw new Error('서버 연결 정보가 없습니다.')
+  check(await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: siteUrl(), shouldCreateUser: true } }))
+}
+
+/** @brief 메일로 받은 6자리 인증번호로 로그인 */
+export async function verifyLoginCode(email, code) {
+  const supabase = getSupabase()
+  const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.replace(/\s+/g, ''), type: 'email' })
+  if (error) {
+    if (/expired|invalid/i.test(error.message)) throw new Error('인증번호가 맞지 않거나 시간이 지났습니다. 새 인증번호를 받아 다시 입력하세요.')
+    throw new Error(describeCloudError(error))
+  }
+}
+
+/** @brief Google 계정으로 로그인 (Supabase에서 Google 로그인을 켜 둔 경우만) */
+export async function signInWithGoogle() {
+  const supabase = getSupabase()
+  check(await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: siteUrl() } }))
+}
+
+/** @brief 서버에서 켜 둔 로그인 방법 { google: boolean } */
+export async function loginProviders() {
+  const config = getCloudConfig()
+  if (!config) return { google: false }
+  try {
+    const response = await fetch(`${config.url}/auth/v1/settings`, { headers: { apikey: config.anonKey } })
+    const settings = await response.json()
+    return { google: Boolean(settings?.external?.google) }
+  } catch {
+    return { google: false }
+  }
+}
+
+/* ───────────── 교사 프로필 · 관리자 승인 ───────────── */
+
+/** @brief 내 프로필 (없으면 승인 대기 행을 만듦) */
+export async function fetchMyProfile(supabase, user) {
+  const row = check(await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle())
+  if (row) return row
+  check(await supabase.from('profiles').insert({ id: user.id, email: user.email ?? '' }))
+  return check(await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle())
+}
+
+/** @brief 가입 신청 정보 저장 (이름·학교·과목) - 권한·승인 상태는 서버가 바꾸지 못하게 막음 */
+export async function saveMyProfile(userId, { name, school, subject }) {
+  const supabase = getSupabase()
+  check(await supabase.from('profiles').update({ name: name.trim(), school: school.trim(), subject: subject.trim(), requested_at: new Date().toISOString(), status: 'pending' }).eq('id', userId))
+}
+
+/** @brief (관리자) 모든 교사 프로필 */
+export async function listProfiles() {
+  return check(await getSupabase().from('profiles').select('*').order('created_at', { ascending: false }))
+}
+
+/** @brief (관리자) 승인·거절·권한 변경 */
+export async function updateProfileByAdmin(id, patch, adminId) {
+  const next = { ...patch }
+  if (patch.status === 'approved') Object.assign(next, { approved_at: new Date().toISOString(), approved_by: adminId })
+  check(await getSupabase().from('profiles').update(next).eq('id', id))
+}
+
+/* ───────────── 로그인 없이 체험 (이 브라우저에만 저장) ───────────── */
+
+const GUEST_KEY = 'exam-bench.guest'
+export const isGuest = () => safe(() => sessionStorage.getItem(GUEST_KEY) === '1', false)
+export const setGuest = on => safe(() => (on ? sessionStorage.setItem(GUEST_KEY, '1') : sessionStorage.removeItem(GUEST_KEY)))
+
 
 /**
  * @brief 클라우드 저장소 - db.js의 브라우저 저장소와 같은 함수 모양

@@ -1,10 +1,16 @@
 /**
  * @file store.jsx
- * @brief 앱 전역 데이터(평가지·풀이 기록), 중앙 서버 로그인 상태, 해시 라우터, 알림
+ * @brief 앱 전역 데이터(평가지·풀이 기록), 중앙 서버 로그인·승인 상태, 해시 라우터, 알림
+ *
+ * cloud = { configured, ready, user, profile, guest }
+ * - configured: 서버 연결 정보가 있음 (있으면 로그인해야 쓸 수 있음)
+ * - profile: 교사 프로필 { role: 'admin'|'teacher', status: 'pending'|'approved'|'rejected', ... }
+ * - guest: 로그인 없이 체험 (이 브라우저에만 저장)
+ * - 승인된 교사만 서버 저장소를 씀. 승인 전에는 브라우저 저장소(비어 있음)를 그대로 둠
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { createCloudDb, getCloudConfig, getSupabase } from './cloud'
+import { createCloudDb, fetchMyProfile, getCloudConfig, getSupabase, isGuest } from './cloud'
 import { db, setBackend } from './db'
 
 const StoreContext = createContext(null)
@@ -16,7 +22,7 @@ export function StoreProvider({ children }) {
   const [error, setError] = useState('')
   const [toast, setToast] = useState(null)
   // 중앙 서버(Supabase): configured=연결 정보 있음, user=로그인한 교사, ready=로그인 상태 확인 끝
-  const [cloud, setCloud] = useState(() => ({ configured: Boolean(getCloudConfig()), user: null, ready: !getCloudConfig() }))
+  const [cloud, setCloud] = useState(() => ({ configured: Boolean(getCloudConfig()), user: null, profile: null, ready: !getCloudConfig(), guest: isGuest() }))
   const userIdRef = useRef(undefined)
 
   const refresh = useCallback(async () => {
@@ -38,13 +44,27 @@ export function StoreProvider({ children }) {
       refresh()
       return undefined
     }
-    // 로그인한 사용자가 바뀔 때만 저장소를 바꿈 (토큰 갱신 때는 그대로)
-    const apply = session => {
+    // 로그인한 사용자가 바뀔 때만 프로필을 읽고 저장소를 바꿈 (토큰 갱신 때는 그대로)
+    const apply = async session => {
       const user = session?.user ?? null
-      setCloud({ configured: true, user, ready: true })
-      if (userIdRef.current === (user?.id ?? null)) return
+      if (userIdRef.current === (user?.id ?? null)) {
+        setCloud(prev => ({ ...prev, user }))
+        return
+      }
       userIdRef.current = user?.id ?? null
-      setBackend(user ? createCloudDb(supabase, user.id) : null)
+      let profile = null
+      if (user) {
+        try {
+          profile = await fetchMyProfile(supabase, user)
+        } catch (err) {
+          setError(err?.message || '교사 정보를 불러오지 못했습니다.')
+        }
+      }
+      const approved = profile?.status === 'approved'
+      setBackend(user && approved ? createCloudDb(supabase, user.id) : null)
+      // 로그인 링크로 돌아온 주소(#access_token=...)는 첫 화면 주소로 정리
+      if (user && /access_token|refresh_token/.test(window.location.hash)) window.history.replaceState(null, '', `${window.location.pathname}#/`)
+      setCloud(prev => ({ ...prev, configured: true, user, profile, ready: true }))
       setLoading(true)
       refresh()
     }
@@ -64,7 +84,22 @@ export function StoreProvider({ children }) {
     return () => clearTimeout(timer)
   }, [toast])
 
-  const value = useMemo(() => ({ papers, runs, loading, error, refresh, notify, toast, cloud }), [papers, runs, loading, error, refresh, notify, toast, cloud])
+  /** @brief 프로필 다시 읽기 (가입 신청 후, 관리자가 승인한 뒤 등) */
+  const reloadProfile = useCallback(async () => {
+    const supabase = getSupabase()
+    const { data } = await supabase.auth.getSession()
+    const user = data.session?.user
+    if (!user) return
+    const profile = await fetchMyProfile(supabase, user)
+    const approved = profile?.status === 'approved'
+    setBackend(approved ? createCloudDb(supabase, user.id) : null)
+    setCloud(prev => ({ ...prev, profile }))
+    if (approved) refresh()
+  }, [refresh])
+
+  const setGuestMode = useCallback(on => setCloud(prev => ({ ...prev, guest: on })), [])
+
+  const value = useMemo(() => ({ papers, runs, loading, error, refresh, notify, toast, cloud, reloadProfile, setGuestMode }), [papers, runs, loading, error, refresh, notify, toast, cloud, reloadProfile, setGuestMode])
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
 

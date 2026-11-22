@@ -4,18 +4,16 @@
  */
 
 import { useState } from 'react'
-import { createCloudDb, describeCloudError, getCloudConfig, getSupabase, sendLoginLink, setCloudConfig, signOut, uploadLocalData } from '@/lib/cloud'
+import { createCloudDb, describeCloudError, getCloudConfig, getSupabase, setCloudConfig, setGuest, signOut, uploadLocalData } from '@/lib/cloud'
 import { localDb } from '@/lib/db'
 import { useStore } from '@/lib/store'
 
 export default function CloudPanel() {
-  const { cloud, refresh, notify } = useStore()
+  const { cloud, refresh, notify, setGuestMode } = useStore()
   const config = getCloudConfig()
   const [url, setUrl] = useState(config?.url ?? '')
   const [anonKey, setAnonKey] = useState(config?.fromEnv ? '' : config?.anonKey ?? '')
-  const [email, setEmail] = useState('')
   const [busy, setBusy] = useState('')
-  const [sent, setSent] = useState(false)
 
   const saveConfig = () => {
     setCloudConfig(url && anonKey ? { url, anonKey } : null)
@@ -23,22 +21,12 @@ export default function CloudPanel() {
     window.location.reload()
   }
 
-  const login = async event => {
-    event.preventDefault()
-    setBusy('login')
-    try {
-      await sendLoginLink(email)
-      setSent(true)
-    } catch (error) {
-      notify(describeCloudError(error), 'error')
-    } finally {
-      setBusy('')
-    }
-  }
+  // 로그인은 첫 화면(로그인 창)에서 함. 둘러보기 중이면 로그인 창으로 돌아감
+  const goLogin = () => { setGuest(false); setGuestMode(false) }
 
   const logout = async () => {
     await signOut()
-    notify('로그아웃했습니다. 이제 이 브라우저 저장소를 씁니다.')
+    notify('로그아웃했습니다.')
   }
 
   const upload = async () => {
@@ -91,20 +79,20 @@ export default function CloudPanel() {
       {config?.fromEnv && <p className="text-xs text-[var(--color-ink-soft)]">이 사이트에 연결된 서버: <span className="font-mono">{config.url}</span></p>}
 
       {cloud.configured && !cloud.user && (
-        sent ? (
-          <p className="rounded-lg bg-[var(--color-brand-soft)] px-3 py-2 text-sm break-keep"><b>{email}</b>로 로그인 링크를 보냈습니다. 메일의 링크를 이 브라우저에서 열면 로그인됩니다.</p>
-        ) : (
-          <form className="flex flex-wrap gap-2" onSubmit={login}>
-            <input className="input flex-1 min-w-[14rem]" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="교사 이메일" aria-label="로그인 이메일" />
-            <button type="submit" className="btn btn-primary" disabled={busy === 'login'}>{busy === 'login' ? '보내는 중…' : '로그인 링크 받기'}</button>
-          </form>
-        )
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm flex-1 min-w-[12rem]">둘러보기 중입니다. 로그인하면 자료가 본인 계정에 저장됩니다.</span>
+          <button type="button" className="btn btn-primary" onClick={goLogin}>로그인하기</button>
+        </div>
       )}
 
       {cloud.user && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm flex-1 min-w-[12rem]"><b>{cloud.user.email}</b>(으)로 로그인됨</span>
-          <button type="button" className="btn btn-ghost" disabled={Boolean(busy)} onClick={upload}>{busy && busy !== 'login' ? busy : '이 브라우저 자료 서버로 올리기'}</button>
+          <span className="text-sm flex-1 min-w-[12rem]">
+            <b>{cloud.profile?.name || cloud.user.email}</b>
+            {cloud.profile?.name && <span className="text-[var(--color-ink-soft)]"> ({cloud.user.email})</span>}
+            {cloud.profile?.role === 'admin' && <span className="ml-1.5 rounded-full bg-[var(--color-brand)] px-2 py-0.5 text-xs font-bold text-white">관리자</span>}
+          </span>
+          <button type="button" className="btn btn-ghost" disabled={Boolean(busy)} onClick={upload}>{busy || '이 브라우저 자료 서버로 올리기'}</button>
           <button type="button" className="btn btn-ghost" onClick={logout}>로그아웃</button>
         </div>
       )}
