@@ -215,8 +215,12 @@ export async function uploadLocalData(localDb, cloudDb, onProgress) {
       files += 1
     }
   }
+  // 지워진 평가지의 풀이 기록은 올리지 않음
+  let uploadedRuns = 0
   for (const run of runs) {
-    if (papers.some(paper => paper.id === run.paperId)) await cloudDb.saveRun(run)
+    if (!papers.some(paper => paper.id === run.paperId)) continue
+    await cloudDb.saveRun(run)
+    uploadedRuns += 1
   }
-  return { papers: papers.length, runs: runs.length, files }
+  return { papers: papers.length, runs: uploadedRuns, files }
 }

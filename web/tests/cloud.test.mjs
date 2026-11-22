@@ -91,6 +91,7 @@ test('브라우저 자료를 서버로 올리기', async () => {
   }
   const result = await uploadLocalData(local, cloud)
   assert.equal(result.files, 1)
+  assert.equal(result.runs, 1)
   assert.equal(tables.papers.length, 1)
   assert.equal(tables.runs.length, 1, '평가지가 없는 풀이 기록은 올리지 않음')
   assert.equal(tables.paper_files.length, 1)
