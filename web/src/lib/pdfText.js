@@ -77,13 +77,16 @@ async function pageItems(pdf, pageNumber) {
   const content = await page.getTextContent()
   const W = viewport.width
   const H = viewport.height
+  // pdf.js 좌표 변환으로 화면 좌표(왼쪽 위 기준)로 바꿈 → 쪽 시작점이 0이 아니거나 회전된 PDF도 맞게 계산
   return content.items
     .filter(item => typeof item.str === 'string' && item.str.trim())
     .map(item => {
-      const x = item.transform[4]
-      const baseline = item.transform[5]
       const height = Math.abs(item.height || item.transform[3] || 10)
-      return { str: item.str, x0: x / W, x1: (x + item.width) / W, top: (H - baseline - height) / H, bottom: (H - baseline + height * 0.25) / H }
+      const [left, baseline] = viewport.convertToViewportPoint(item.transform[4], item.transform[5])
+      const [right] = viewport.convertToViewportPoint(item.transform[4] + item.width, item.transform[5])
+      const x0 = Math.min(left, right) / W
+      const x1 = Math.max(left, right) / W
+      return { str: item.str, x0, x1, top: (baseline - height) / H, bottom: (baseline + height * 0.25) / H }
     })
 }
 
