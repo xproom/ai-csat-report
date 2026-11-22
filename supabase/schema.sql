@@ -42,6 +42,11 @@ create index if not exists papers_owner_idx on public.papers (owner_id, updated_
 create index if not exists runs_owner_idx on public.runs (owner_id, paper_id);
 create index if not exists paper_files_paper_idx on public.paper_files (paper_id, ord);
 
+-- 최근 Supabase 프로젝트는 표 권한을 자동으로 주지 않으므로, 로그인한 교사(authenticated)에게만 명시적으로 부여
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.papers, public.runs, public.paper_files to authenticated;
+revoke all on public.papers, public.runs, public.paper_files from anon;
+
 alter table public.papers enable row level security;
 alter table public.runs enable row level security;
 alter table public.paper_files enable row level security;
