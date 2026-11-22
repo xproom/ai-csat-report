@@ -59,6 +59,12 @@ export function stateAt(replay, clockMs) {
   let caption = null
   let solvedCount = 0
   let notes = []
+  // 문항별 풀이 기록 (지난 문항도 시험지에 남겨 두기 위함)
+  const notesByNo = new Map()
+  const keep = (no, note) => {
+    if (!notesByNo.has(no)) notesByNo.set(no, [])
+    notesByNo.get(no).push(note)
+  }
 
   for (const event of replay.events) {
     if (event.t > clockMs) break
@@ -67,6 +73,7 @@ export function stateAt(replay, clockMs) {
         currentNo = event.no
         currentStart = event.t
         notes = []
+        notesByNo.set(event.no, [])
         caption = null
         break
       case 'page': {
@@ -80,13 +87,16 @@ export function stateAt(replay, clockMs) {
       case 'step':
         caption = { kind: 'step', text: event.text }
         notes.push({ kind: 'step', text: event.text, t: event.t })
+        keep(event.no, { kind: 'step', text: event.text, t: event.t })
         break
       case 'work':
         notes.push({ kind: 'work', text: event.text, t: event.t })
+        keep(event.no, { kind: 'work', text: event.text, t: event.t })
         break
       case 'answer':
         answeredNos.add(event.no)
         notes.push({ kind: 'answer', text: event.text, t: event.t })
+        keep(event.no, { kind: 'answer', text: event.text, t: event.t })
         break
       case 'end':
         solvedCount += 1
@@ -98,11 +108,14 @@ export function stateAt(replay, clockMs) {
 
   const done = clockMs >= replay.totalMs && replay.events.length > 0
   // 마지막 줄은 글씨를 써 내려가는 효과
-  const writtenNotes = notes.map((note, index) => {
-    const chars = index === notes.length - 1 ? Math.floor(((clockMs - note.t) / 1000) * WRITE_CHARS_PER_SEC) : Infinity
+  const writeOut = list => list.map((note, index) => {
+    const chars = index === list.length - 1 ? Math.floor(((clockMs - note.t) / 1000) * WRITE_CHARS_PER_SEC) : Infinity
     const visible = note.text.slice(0, Math.max(1, chars))
     return { kind: note.kind, text: note.text, visible, writing: visible.length < note.text.length }
   })
+  const writtenNotes = writeOut(notes)
+  // 지난 문항은 다 쓴 상태, 지금 문항은 써 내려가는 중
+  const writtenByNo = new Map([...notesByNo].filter(([, list]) => list.length).map(([no, list]) => [no, no === currentNo && !done ? writeOut(list) : list.map(note => ({ kind: note.kind, text: note.text, visible: note.text, writing: false }))]))
 
   // 가장 최근에 page가 알려진 문항의 쪽을 이어서 보여줌
   let page = currentNo != null ? pageByNo.get(currentNo) ?? null : null
@@ -113,6 +126,7 @@ export function stateAt(replay, clockMs) {
     answeredNos,
     page,
     notes: done ? [] : writtenNotes,
+    notesByNo: writtenByNo,
     caption: done ? null : caption,
     questionElapsedMs: currentNo != null ? clockMs - currentStart : 0,
     solvedCount,

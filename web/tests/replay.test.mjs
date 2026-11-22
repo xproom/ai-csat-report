@@ -105,3 +105,22 @@ test('replay without trace estimates timing from total duration', () => {
   assert.deepEqual([...end.answeredNos].sort(), [1, 3])
   assert.equal(formatClock(65400, true), '01:05.4')
 })
+
+test('지난 문항의 풀이 기록은 남고, 지금 문항은 써 내려가는 중', () => {
+  const p = paper()
+  const run = {
+    durationMs: 6000,
+    answers: { 1: { answer: '3', status: 'answered' }, 2: { answer: '2', status: 'answered' } },
+    trace: [
+      { t: 0, no: 1, kind: 'start' }, { t: 500, no: 1, kind: 'work', text: '1 + 2 = 3' }, { t: 900, no: 1, kind: 'answer', text: '3' }, { t: 1000, no: 1, kind: 'end' },
+      { t: 1000, no: 2, kind: 'start' }, { t: 1500, no: 2, kind: 'work', text: '6 - 4 = 2 이므로 답은 2' }, { t: 5000, no: 2, kind: 'end' }
+    ]
+  }
+  const state = stateAt(buildReplay(p, run), 1600)
+  assert.equal(state.currentNo, 2)
+  assert.deepEqual(state.notesByNo.get(1).map(note => note.visible), ['1 + 2 = 3', '3'])
+  assert.equal(state.notesByNo.get(1).every(note => !note.writing), true)
+  assert.equal(state.notesByNo.get(2)[0].writing, true)
+  const end = stateAt(buildReplay(p, run), 6000)
+  assert.equal(end.notesByNo.get(2)[0].visible, '6 - 4 = 2 이므로 답은 2')
+})

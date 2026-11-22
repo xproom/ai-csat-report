@@ -15,6 +15,7 @@ import { CLAUDE_MODELS, EFFORT_LEVELS } from '@/lib/aiRunner'
 import { db } from '@/lib/db'
 import { gradeRun } from '@/lib/grading'
 import { runLiveSolve } from '@/lib/liveSolve'
+import { buildQuestionIndex } from '@/lib/pdfText'
 import { buildReplay, formatClock, formatDuration, stateAt } from '@/lib/replay'
 import { QUESTION_TYPES, missingAnswers, paperTitle } from '@/lib/schema'
 import { getApiKey } from '@/lib/settings'
@@ -116,6 +117,19 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   }, [focusNo, replay, live, run])
   const display = focusView ?? view
 
+  // PDF 글자 위치로 만든 문항 색인 (문제지가 PDF 한 개일 때). 없으면 null → 아래 상자에 풀이 표시
+  const [questionIndex, setQuestionIndex] = useState(null)
+  const stageRef = useRef(null)
+  useEffect(() => {
+    let cancelled = false
+    const pdf = files.length === 1 && files[0]?.type === 'application/pdf' ? files[0] : null
+    if (!pdf) return undefined
+    buildQuestionIndex(pdf, paper)
+      .then(index => { if (!cancelled) setQuestionIndex(index?.found ? index : null) })
+      .catch(() => { if (!cancelled) setQuestionIndex(null) })
+    return () => { cancelled = true }
+  }, [files, paper])
+
   /** @brief OMR 문항을 누르면 그 문항의 문제·풀이를 보여줌 (같은 문항을 다시 누르면 닫힘) */
   const selectQuestion = no => {
     if (!live) setPlaying(false)
@@ -194,7 +208,27 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   }
 
   const currentQuestion = paper.questions.find(question => question.no === display?.currentNo)
-  const pageRef = display?.page ?? (display?.currentNo != null ? guessPage(paper, files, display.currentNo, pageCounts) : { file: 0, page: 1 })
+  // 쪽 고르기: PDF 글자 위치(가장 정확) → 모델이 알려 준 쪽 → 문항 순서로 짐작
+  const indexedRegion = display?.currentNo != null ? questionIndex?.regionOf(display.currentNo) : null
+  const pageRef = indexedRegion
+    ? { file: 0, page: indexedRegion.page }
+    : display?.page ?? (display?.currentNo != null ? guessPage(paper, files, display.currentNo, pageCounts) : { file: 0, page: 1 })
+
+  // 지금 쪽에 있는 문제마다 아래 빈칸에 풀이 기록을 남김
+  const annotations = useMemo(() => {
+    if (!questionIndex || !view) return []
+    const notesByNo = new Map(view.notesByNo ?? [])
+    if (focusView?.notesByNo?.get(focusNo)) notesByNo.set(focusNo, focusView.notesByNo.get(focusNo))
+    return questionIndex.regionsOnPage(pageRef.page)
+      .map(region => ({
+        ...region,
+        type: paper.questions.find(question => question.no === region.no)?.type,
+        notes: (notesByNo.get(region.no) ?? []).filter(note => note.visible),
+        active: region.no === display?.currentNo
+      }))
+      .filter(annotation => annotation.notes.length || annotation.active)
+  }, [questionIndex, view, focusView, focusNo, pageRef.page, paper, display?.currentNo])
+  const writesOnPaper = annotations.length > 0 || Boolean(indexedRegion)
   const solved = live ? new Set(live.events.filter(event => event.kind === 'end').map(event => event.no)).size : view?.solvedCount ?? 0
 
   return (
@@ -329,11 +363,15 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
               </div>
             ) : (
               <div className="relative">
-                <div className="relative max-h-[72vh] min-h-[22rem] overflow-hidden bg-white pt-12">
+                {/* 배지·자막은 고정, 문제지만 스크롤 */}
+                <div className="relative min-h-[22rem] bg-white">
+                  <div ref={stageRef} className="max-h-[72vh] min-h-[22rem] overflow-y-auto pt-12">
                   <PageView
                     files={files}
                     pageRef={pageRef}
                     onPageCount={reportPageCount}
+                    annotations={annotations}
+                    scrollRef={stageRef}
                     placeholder={(
                       <div className="flex min-h-[22rem] flex-col items-center justify-center gap-2 bg-[#fbfaf6] px-6 py-10 text-center">
                         <div className="text-xs font-bold text-[var(--color-ink-soft)]">{paperTitle(paper)}</div>
@@ -342,6 +380,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
                       </div>
                     )}
                   />
+                  </div>
 
                   {/* 현재 문항 배지 */}
                   {currentQuestion && (
@@ -361,7 +400,8 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
                     </div>
                   )}
 
-                  {display?.notes.length > 0 && (
+                  {/* 문제 위치를 모르면(사진·스캔본) 아래 상자에 풀이 표시 */}
+                  {!writesOnPaper && display?.notes.length > 0 && (
                     <div className="absolute inset-x-3 bottom-14 sm:inset-x-6 max-h-[45%] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[#fffdf6]/95 px-4 py-3 shadow-lg backdrop-blur-[2px]">
                       <ol className="space-y-0.5">
                         {display.notes.filter(note => note.kind !== 'step').slice(-6).map((note, index) => (
