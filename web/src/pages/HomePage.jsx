@@ -26,7 +26,7 @@ const STEPS = [
 
 
 export default function HomePage() {
-  const { papers, runs, refresh, notify } = useStore()
+  const { papers, runs, refresh, notify, cloud } = useStore()
   const [level, setLevel] = useState('전체')
   const [examType, setExamType] = useState('전체')
   const [query, setQuery] = useState('')
@@ -90,7 +90,7 @@ export default function HomePage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-xl sm:text-2xl font-extrabold">평가지</h2>
-            <p className="text-sm text-[var(--color-ink-soft)]">{papers.length}개 · 이 브라우저에 저장됨</p>
+            <p className="text-sm text-[var(--color-ink-soft)]">{papers.length}개 · {cloud.user ? '서버에 저장됨' : '이 브라우저에 저장됨'}</p>
           </div>
           {papers.length > 0 && (
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
