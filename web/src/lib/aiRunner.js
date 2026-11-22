@@ -303,6 +303,77 @@ export function importRuns(json, paper) {
   })
 }
 
+/**
+ * @brief 구조화 출력(JSON)을 스트리밍으로 받기 - 오래 걸리는 요청의 진행 표시와 시간 제한용
+ * - 응답이 STALL_MS 동안 한 글자도 오지 않거나 전체가 TOTAL_MS를 넘으면 멈추고 오류로 알림
+ * - 자동 재시도는 한 번만 (기본값 2번이면 실패할 때 화면이 오래 멈춘 것처럼 보임)
+ * @returns {Promise<{ text: string, response: Object, durationMs: number }>}
+ */
+const STALL_MS = 3 * 60 * 1000
+const TOTAL_MS = 12 * 60 * 1000
+async function streamClaudeJson({ apiKey, modelInfo, effort, system, content, schema, signal, onText, onWaiting }) {
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 1, timeout: TOTAL_MS })
+  const started = performance.now()
+  const controller = new AbortController()
+  const abortFromCaller = () => controller.abort()
+  signal?.addEventListener('abort', abortFromCaller)
+  let lastEvent = performance.now()
+  let timeoutReason = ''
+  let received = false
+  const watchdog = setInterval(() => {
+    const now = performance.now()
+    if (now - lastEvent > STALL_MS) timeoutReason = `AI가 ${Math.round(STALL_MS / 60000)}분 동안 응답하지 않아 멈췄습니다.`
+    else if (now - started > TOTAL_MS) timeoutReason = `${Math.round(TOTAL_MS / 60000)}분이 지나도 끝나지 않아 멈췄습니다.`
+    if (timeoutReason) controller.abort()
+    else if (!received) onWaiting?.(now - started)
+  }, 1000)
+  const request = {
+    model: modelInfo.id,
+    max_tokens: 32000,
+    system,
+    output_config: { effort, format: { type: 'json_schema', schema } },
+    messages: [{ role: 'user', content }]
+  }
+  const open = withFallback => (withFallback
+    ? client.beta.messages.stream({ ...request, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }, { signal: controller.signal })
+    : client.messages.stream(request, { signal: controller.signal }))
+  const run = async withFallback => {
+    const stream = open(withFallback)
+    let text = ''
+    for await (const event of stream) {
+      lastEvent = performance.now()
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        received = true
+        text += event.delta.text
+        onText?.(text, performance.now() - started)
+      }
+    }
+    return { text, response: await stream.finalMessage() }
+  }
+  try {
+    let result
+    try {
+      result = await run(Boolean(modelInfo.fallback))
+    } catch (error) {
+      // 계정에서 대체 모델 기능을 받지 않으면(크레딧과 무관한 400) 기능 없이 한 번 더
+      if (controller.signal.aborted || !modelInfo.fallback || Number(error?.status) !== 400 || /credit|balance|billing/i.test(rawMessage(error))) throw error
+      result = await run(false)
+    }
+    const { text, response } = result
+    if (response.stop_reason === 'refusal') throw new Error(`모델이 응답을 거절했습니다${response.stop_details?.category ? ` (${response.stop_details.category})` : ''}.`)
+    if (response.stop_reason === 'max_tokens') throw new Error('결과가 너무 길어 중간에 잘렸습니다. 문제지를 나눠 올리거나 다른 모델로 다시 시도하세요.')
+    return { text, response, durationMs: Math.round(performance.now() - started) }
+  } catch (error) {
+    if (timeoutReason) throw new Error(`${timeoutReason} 잠시 뒤 다시 시도하거나 더 빠른 모델(Sonnet·Haiku)을 골라 보세요.`)
+    if (signal?.aborted) throw error
+    if (error instanceof Error && !('status' in error) && /거절|잘렸/.test(error.message)) throw error
+    throw new Error(describeApiError(error).message)
+  } finally {
+    clearInterval(watchdog)
+    signal?.removeEventListener('abort', abortFromCaller)
+  }
+}
+
 /* ───────────── 문제지 검증용: AI가 문제지를 읽고 사실만 기록 (풀지 않음) ───────────── */
 
 const VERIFY_SCHEMA = {
@@ -357,20 +428,33 @@ const VERIFY_PROMPT = `당신은 학교 시험 문제지를 검토하는 교사�
  * @brief AI가 문제지를 읽어 검증용 사실(facts)을 만듦 - verify.validatePaper에 그대로 넣을 수 있는 형태
  * @returns {Promise<Object>} facts { source:'ai', pages, anchors, questions, defaultPoints, notes }
  */
-export async function verifyPaperWithClaude({ apiKey, model = CLAUDE_MODELS[0].id, paper, files, signal }) {
+export async function verifyPaperWithClaude({ apiKey, model = CLAUDE_MODELS[0].id, paper, files, signal, expectedCount = 0, pageHint = '', onProgress }) {
   if (!apiKey) throw new Error('AI 정밀 검증을 하려면 설정에서 Anthropic API 키를 입력하세요.')
   if (!files.length) throw new Error('검증할 문제지 파일이 없습니다.')
   const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
+  onProgress?.({ phase: 'upload', done: 0, expected: expectedCount || paper.questions.length })
   const blocks = []
   for (const file of files) blocks.push(await fileToBlock(file))
-  const { text, response, durationMs } = await callClaude({
+  const form = formTypeOf(paper.meta)
+  const instruction = [
+    form ? `첨부한 문제지에 홀수형과 짝수형이 함께 있으면 ${form} 부분만 읽으세요.${pageHint ? ` (${form}은 ${pageHint})` : ''}` : '',
+    `교사가 입력한 문항 구성(참고용, 문제지와 다르면 문제지 그대로 적을 것): ${paper.questions.length}문항\n${describeQuestions(paper)}`
+  ].filter(Boolean).join('\n')
+  const { text, response, durationMs } = await streamClaudeJson({
     apiKey,
     modelInfo,
-    effort: 'medium',
+    // 문제를 푸는 일이 아니라 보이는 대로 옮겨 적는 일이라 짧게 생각
+    effort: 'low',
     system: VERIFY_PROMPT,
     schema: VERIFY_SCHEMA,
-    content: [...blocks, { type: 'text', text: `${formTypeOf(paper.meta) ? `첨부한 문제지에 홀수형과 짝수형이 함께 있으면 ${formTypeOf(paper.meta)} 부분만 읽으세요. ` : ''}교사가 입력한 문항 구성(참고용, 문제지와 다르면 문제지 그대로 적을 것): ${paper.questions.length}문항\n${describeQuestions(paper)}` }],
-    signal
+    content: [...blocks, { type: 'text', text: instruction }],
+    signal,
+    onText: (soFar, elapsedMs) => {
+      // 지금까지 적은 문항 수로 진행 정도를 셈
+      const done = (soFar.match(/"no"\s*:/g) ?? []).length
+      onProgress?.({ phase: 'writing', done, expected: Math.max(done, expectedCount || paper.questions.length), elapsedMs })
+    },
+    onWaiting: elapsedMs => onProgress?.({ phase: 'reading', done: 0, expected: expectedCount || paper.questions.length, elapsedMs })
   })
   let data
   try {
