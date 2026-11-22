@@ -60,16 +60,17 @@ export function blankRegion(items, anchors, anchor) {
   // 다음 문제 줄에 붙은 글자(수식 기호가 줄보다 조금 위에 놓인 경우 등)는 이 문제 글로 보지 않음
   const inQuestion = colItems.filter(item => item.top >= anchor.top - 0.005 && item.top < nextTop - 0.015)
   const contentBottom = inQuestion.length ? Math.max(...inQuestion.map(item => item.bottom)) : anchor.top + 0.03
-  let top = contentBottom + 0.008
-  const bottom = nextTop - 0.008
-  // 빈칸이 너무 좁으면 위로 조금 겹쳐서라도 최소 높이를 확보
-  if (bottom - top < 0.06) top = Math.max(anchor.top + 0.02, bottom - 0.06)
+  // 빈칸은 늘 문제 글(선지 포함)이 끝난 아래에서 시작 → 문제·선지를 가리지 않음
+  const top = contentBottom + 0.008
+  // 빈칸이 거의 없으면 최소 높이만 잡아 둠 (tight). 풀이가 길면 화면에서 상자를 아래로 늘려 보여 줌
+  const bottom = Math.max(nextTop - 0.008, top + 0.03)
+  const tight = nextTop - 0.008 - top < 0.06
   // 단 경계(가운데 0.5)를 넘지 않게 하고, 단 전체 너비를 씀
   // (문제 글이 짧아도 빈칸은 단 끝까지: 오른쪽 단의 끝은 왼쪽 여백과 대칭으로 잡음)
   const pageLeft = Math.min(...items.filter(item => item.str.trim()).map(item => item.x0), colX0)
   const x0 = anchor.col === 0 ? Math.max(0, colX0 - 0.005) : Math.max(0.5, colX0 - 0.005)
   const x1 = anchor.col === 0 ? 0.49 : Math.min(1, Math.max(colX1 + 0.005, 1 - pageLeft))
-  return { x0, x1, top, bottom, qTop: anchor.top }
+  return { x0, x1, top, bottom, qTop: anchor.top, tight, pageBottom }
 }
 
 /** @brief PDF 한 쪽의 글자 조각을 비율 좌표로 */
