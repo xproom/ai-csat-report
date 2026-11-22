@@ -1,12 +1,15 @@
 /**
  * @file AnswerKeyUpload.jsx
  * @brief 실제 정답(정답표) 업로드 - 파일·붙여넣기·정답표 사진(PDF) 읽기 → 비교 미리보기 → 반영
+ * - 정답표의 번호·유형이 평가지 구성과 다르면 정답표대로 문항 구성을 바꿔 반영하도록 제안
+ * - 아직 반영하지 않은 정답표가 있으면 onPendingChange로 알려, 다음 단계로 넘어갈 때 확인하게 함
  */
 
 import { useMemo, useRef, useState } from 'react'
 import { readAnswerKeyWithClaude } from '@/lib/aiRunner'
-import { applyAnswerKey, diffAnswerKey, parseAnswerKey } from '@/lib/answerKey'
-import { QUESTION_TYPES } from '@/lib/schema'
+import { applyAnswerKey, applyAnswerKeyText, diffAnswerKey, parseAnswerKey, proposeStructure } from '@/lib/answerKey'
+import { describeComposition } from '@/lib/presets'
+import { missingAnswers, QUESTION_TYPES } from '@/lib/schema'
 import { getApiKey } from '@/lib/settings'
 import { Icon } from './Layout'
 
@@ -26,16 +29,25 @@ const EXAMPLE = `번호,정답,배점
 21,12
 22,1/2|0.5`
 
-export default function AnswerKeyUpload({ paper, onApply }) {
+export default function AnswerKeyUpload({ paper, onApply, onPendingChange }) {
   const inputRef = useRef(null)
-  const [text, setText] = useState('')
-  const [fileName, setFileName] = useState('')
+  const [text, setTextState] = useState('')
+  const [fileName, setFileNameState] = useState('')
+  // 반영 전 정답표를 부모에게 알림 (다음 단계로 넘어갈 때 반영 여부를 묻는 데 씀)
+  const setText = (value, name = fileName) => {
+    setTextState(value)
+    onPendingChange?.(String(value).trim() ? { text: value, fileName: name || '직접 붙여넣기' } : null)
+  }
+  const setFileName = name => setFileNameState(name)
   const [reading, setReading] = useState(false)
   const [error, setError] = useState('')
   const [applyPoints, setApplyPoints] = useState(true)
   const [showAll, setShowAll] = useState(false)
 
   const parsed = useMemo(() => (text.trim() ? parseAnswerKey(text, paper) : null), [text, paper])
+  const proposal = useMemo(() => proposeStructure(paper, parsed), [paper, parsed])
+  const keyTargets = paper.questions.filter(question => question.type !== 'essay').length
+  const keysEntered = keyTargets - missingAnswers(paper).length
   const diff = useMemo(() => (parsed ? diffAnswerKey(paper, parsed.entries) : []), [parsed, paper])
   const counts = diff.reduce((acc, row) => ({ ...acc, [row.status]: (acc[row.status] || 0) + 1 }), {})
   const hasPoints = parsed?.entries.some(entry => entry.points)
@@ -46,13 +58,13 @@ export default function AnswerKeyUpload({ paper, onApply }) {
     setError('')
     setFileName(file.name)
     if (TEXT_TYPES.test(file.name) || file.type.startsWith('text/') || file.type === 'application/json') {
-      setText(await file.text())
+      setText(await file.text(), file.name)
       return
     }
     if (SCAN_TYPES.includes(file.type)) {
       setReading(true)
       try {
-        setText(await readAnswerKeyWithClaude({ apiKey: getApiKey(), paper, file: { name: file.name, type: file.type, blob: file } }))
+        setText(await readAnswerKeyWithClaude({ apiKey: getApiKey(), paper, file: { name: file.name, type: file.type, blob: file } }), file.name)
       } catch (err) {
         setError(err?.message || '정답표를 읽지 못했습니다.')
       } finally {
@@ -69,6 +81,13 @@ export default function AnswerKeyUpload({ paper, onApply }) {
     setFileName('')
   }
 
+  /** @brief 정답표대로 문항 구성을 바꾸고 정답·배점을 반영 */
+  const applyWithStructure = () => {
+    onApply(applyAnswerKeyText(paper, text, { fileName: fileName || '직접 붙여넣기', restructure: 'always' }).paper)
+    setText('')
+    setFileName('')
+  }
+
   return (
     <div className="card p-4 sm:p-6 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -76,6 +95,9 @@ export default function AnswerKeyUpload({ paper, onApply }) {
           <h2 className="text-lg font-extrabold">실제 정답 업로드</h2>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">학교에서 공개한 정답표를 올리면 모든 문항의 정답에 한 번에 반영됩니다. AI 답은 이 정답과 비교해 채점됩니다.</p>
         </div>
+        <span className={`rounded-full px-3 py-1 text-sm font-extrabold ${keysEntered === keyTargets && keyTargets ? 'bg-emerald-100 text-emerald-900' : keysEntered ? 'bg-amber-100 text-amber-900' : 'bg-red-50 text-[var(--color-pen)]'}`}>
+          정답 입력 {keysEntered} / {keyTargets}문항
+        </span>
         {source?.type === 'upload' && (
           <span className="chip !bg-emerald-50 !text-emerald-800">
             실제 정답 반영됨 · {source.fileName} · {new Date(source.appliedAt).toLocaleDateString('ko-KR')}
@@ -105,7 +127,7 @@ export default function AnswerKeyUpload({ paper, onApply }) {
             className="input font-mono text-sm min-h-[8.5rem]"
             value={text}
             placeholder={`${EXAMPLE}\n\n(번호 없이 "35124…" 처럼 순서대로 써도 됩니다)`}
-            onChange={e => { setText(e.target.value); setFileName('') }}
+            onChange={e => { setFileName(''); setText(e.target.value, '') }}
           />
         </label>
       </div>
@@ -125,7 +147,7 @@ export default function AnswerKeyUpload({ paper, onApply }) {
             )}
           </div>
 
-          {parsed.entries.length > 0 && (
+          {(parsed.entries.length > 0 || proposal.differs) && (
             <>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="flex items-center gap-2 text-xs font-semibold">
@@ -165,9 +187,19 @@ export default function AnswerKeyUpload({ paper, onApply }) {
                   </table>
                 </div>
               )}
+              {proposal.differs && (
+                <div className="rounded-xl border border-[var(--color-brand)]/30 bg-[var(--color-brand-soft)]/60 px-3 py-2.5 text-sm">
+                  <b>정답표와 평가지의 문항 구성이 다릅니다.</b>
+                  <span className="block text-[var(--color-ink-soft)]">평가지: {describeComposition(paper.questions)} → 정답표: {describeComposition(proposal.questions)}{parsed.unknownNos.length ? ` (평가지에 없는 번호 ${parsed.unknownNos.length}개)` : ''}</span>
+                  <span className="block text-xs text-[var(--color-ink-soft)]">정답표대로 바꾸면 번호마다 유형(①~⑤는 객관식, 그 밖은 단답형)과 배점이 맞춰집니다.</span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-3">
-                <button type="button" className="btn btn-primary" onClick={apply}>정답 {parsed.entries.length}문항 반영</button>
-                <button type="button" className="btn btn-ghost" onClick={() => { setText(''); setFileName('') }}>취소</button>
+                {proposal.differs && (
+                  <button type="button" className="btn btn-primary" onClick={applyWithStructure}>정답표대로 {proposal.questions.length}문항 구성 바꾸고 반영</button>
+                )}
+                <button type="button" className={`btn ${proposal.differs ? 'btn-ghost' : 'btn-primary'}`} onClick={apply}>{proposal.differs ? '구성은 그대로 두고 ' : ''}정답 {parsed.entries.length}문항 반영</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { setFileName(''); setText('', '') }}>취소</button>
                 {counts.missing > 0 && <span className="text-xs text-[var(--color-ink-soft)]">정답표에 없는 {counts.missing}문항은 기존 정답을 유지합니다.</span>}
               </div>
             </>

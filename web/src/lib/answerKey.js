@@ -10,6 +10,7 @@
  */
 
 import { normalizeChoice } from './grading.js'
+import { questionsFromAnswerKey } from './presets.js'
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩'
 
@@ -64,23 +65,24 @@ function fromLines(text) {
   return entries
 }
 
-/** @brief 번호 없이 정답만 나열한 경우 순서대로 대입 */
-function fromSequence(text, paper) {
+/** @brief 번호 없이 정답만 나열한 경우 순서대로 1번부터 번호를 붙임 */
+function fromSequence(text) {
   const compact = text.replace(/[①-⑩]/g, char => ` ${CIRCLED.indexOf(char) + 1} `).trim()
   let tokens = compact.split(/[\s,;/|]+/).filter(Boolean)
   // "35124"처럼 붙여 쓴 객관식 정답
   if (tokens.length === 1 && /^[1-9]+$/.test(tokens[0])) tokens = tokens[0].split('')
-  return tokens.slice(0, paper.questions.length).map((answer, index) => ({ no: paper.questions[index].no, answer }))
+  return tokens.map((answer, index) => ({ no: index + 1, answer }))
 }
 
 /**
  * @brief 업로드한 정답 텍스트 해석
- * @returns {{ entries: Array<{ no, answer, points? }>, format: string, unknownNos: number[] }}
+ * @returns {{ entries: Array<{ no, answer, points? }>, allEntries: Array<{ no, answer, points?, circled }>, format: string, unknownNos: number[] }}
+ *   entries는 평가지에 있는 번호만, allEntries는 정답표의 모든 번호 (문항 구성을 정답표에 맞출 때 사용)
  */
 export function parseAnswerKey(text, paper) {
   // trim()은 파일 앞의 BOM도 함께 제거함
   const trimmed = String(text ?? '').trim()
-  if (!trimmed) return { entries: [], format: 'empty', unknownNos: [] }
+  if (!trimmed) return { entries: [], allEntries: [], format: 'empty', unknownNos: [] }
 
   let entries = []
   let format = ''
@@ -98,13 +100,26 @@ export function parseAnswerKey(text, paper) {
   }
   // 번호로 읽힌 항목이 없거나, 번호 없이 문항 대부분을 순서대로 나열한 경우에만 순서 대입 (JSON은 제외)
   if (format !== 'JSON' && entries.length < Math.min(3, paper.questions.length)) {
-    const sequence = fromSequence(trimmed, paper)
+    const sequence = fromSequence(trimmed)
     const looksLikeSequence = entries.length === 0 || sequence.length >= paper.questions.length * 0.8
     if (looksLikeSequence && sequence.length > entries.length) {
       entries = sequence
       format = '순서대로 나열'
     }
   }
+
+  // 정답표의 모든 항목 (번호 중복이면 마지막 값)
+  const allByNo = new Map()
+  for (const entry of entries) {
+    if (!Number.isInteger(entry.no) || entry.no < 1 || entry.no > 200) continue
+    allByNo.set(entry.no, {
+      no: entry.no,
+      answer: cleanAnswer(entry.answer),
+      points: Number.isFinite(entry.points) && entry.points > 0 ? entry.points : undefined,
+      circled: /[①-⑩]/.test(String(entry.answer ?? ''))
+    })
+  }
+  const allEntries = [...allByNo.values()].sort((a, b) => a.no - b.no)
 
   const byNo = new Map(paper.questions.map(question => [question.no, question]))
   const unknownNos = []
@@ -121,7 +136,7 @@ export function parseAnswerKey(text, paper) {
       points: Number.isFinite(entry.points) && entry.points > 0 ? entry.points : undefined
     })
   }
-  return { entries: [...merged.values()].sort((a, b) => a.no - b.no), format, unknownNos }
+  return { entries: [...merged.values()].sort((a, b) => a.no - b.no), allEntries, format, unknownNos: [...new Set(unknownNos)] }
 }
 
 /**
@@ -155,4 +170,42 @@ export function applyAnswerKey(paper, entries, { fileName = '', applyPoints = tr
     }),
     answerKeySource: { type: 'upload', fileName, appliedAt: new Date().toISOString(), count: entries.length }
   }
+}
+
+/**
+ * @brief 정답표로 짐작한 문항 구성과 현재 구성이 다른지
+ * - 정답표에 평가지에 없는 번호가 있거나, 같은 번호의 유형이 다르면 다르다고 봄
+ * @returns {{ questions: Array, differs: boolean }}
+ */
+export function proposeStructure(paper, parsed) {
+  if (!parsed?.allEntries?.length || parsed.allEntries.length < 3) return { questions: [], differs: false }
+  const questions = questionsFromAnswerKey(parsed.allEntries, paper.meta)
+  const currentByNo = new Map(paper.questions.map(question => [question.no, question]))
+  const differs = parsed.unknownNos.length > 0
+    || questions.length !== paper.questions.length
+    || questions.some(question => currentByNo.get(question.no)?.type !== question.type)
+  return { questions, differs }
+}
+
+/**
+ * @brief 정답표 텍스트를 평가지에 반영 (필요하면 문항 구성도 정답표에 맞춤)
+ * @param {'auto'|'never'|'always'} options.restructure - auto면 구성이 다를 때만 정답표대로 바꿈
+ * @returns {{ paper: Object, restructured: boolean, count: number }}
+ */
+export function applyAnswerKeyText(paper, text, { fileName = '', restructure = 'auto', applyPoints = true } = {}) {
+  const parsed = parseAnswerKey(text, paper)
+  const proposal = proposeStructure(paper, parsed)
+  const useStructure = restructure === 'always' || (restructure === 'auto' && proposal.differs)
+  if (useStructure && proposal.questions.length) {
+    return {
+      paper: {
+        ...paper,
+        questions: proposal.questions,
+        answerKeySource: { type: 'upload', fileName, appliedAt: new Date().toISOString(), count: proposal.questions.length, restructured: true }
+      },
+      restructured: true,
+      count: proposal.questions.filter(question => question.answer).length
+    }
+  }
+  return { paper: applyAnswerKey(paper, parsed.entries, { fileName, applyPoints }), restructured: false, count: parsed.entries.length }
 }

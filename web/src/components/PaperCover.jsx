@@ -37,6 +37,9 @@ export default function PaperCover({ paper, compact = false }) {
             <div className="font-serif" style={{ fontSize: compact ? '13cqw' : '12cqw', fontWeight: 800, lineHeight: 1.15, marginTop: '1.5cqw', letterSpacing: '0.08em' }}>
               {meta.subject}
             </div>
+            {meta.elective && (
+              <div style={{ fontSize: '3.6cqw', marginTop: '1cqw', fontWeight: 700, opacity: 0.85 }}>선택과목 · {meta.elective}</div>
+            )}
             {meta.title?.trim() && (
               <div style={{ fontSize: '3.4cqw', marginTop: '1.5cqw', opacity: 0.8 }}>{meta.title}</div>
             )}

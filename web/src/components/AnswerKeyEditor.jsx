@@ -1,10 +1,15 @@
 /**
  * @file AnswerKeyEditor.jsx
  * @brief 문항 구성(객관식·단답형·서술형 개수)과 정답·배점 입력
+ * - 유형 칸을 누르면 그 문항만 유형을 바꿀 수 있어 수능처럼 유형이 섞인 구성도 만들 수 있음
+ * - 수능·모의고사 과목이면 표준 구성을 한 번에 적용
  */
 
 import { useState } from 'react'
+import { describeComposition, standardPreset } from '@/lib/presets'
 import { buildQuestions, countByType, QUESTION_TYPES, totalPoints } from '@/lib/schema'
+
+const TYPE_ORDER = ['choice', 'short', 'essay']
 
 const CIRCLED = ['①', '②', '③', '④', '⑤']
 
@@ -20,13 +25,46 @@ function NumberField({ label, value, onChange, min = 0, max = 60 }) {
 export default function AnswerKeyEditor({ paper, onChange }) {
   const counts = countByType(paper)
   const firstChoice = paper.questions.find(question => question.type === 'choice')
-  const [layout, setLayout] = useState({
+  // 사용자가 숫자를 고치기 전에는 현재 구성 그대로 보여줌 (프리셋·유형 변경 뒤에도 자동으로 맞음)
+  const [draftLayout, setDraftLayout] = useState(null)
+  const layout = draftLayout ?? {
     choiceCount: counts.choice,
     shortCount: counts.short,
     essayCount: counts.essay,
     choices: firstChoice?.choices ?? 5
-  })
+  }
+  const setLayout = next => setDraftLayout(next)
   const total = totalPoints(paper)
+  const preset = standardPreset(paper.meta)
+  const hasAnswers = paper.questions.some(question => String(question.answer ?? '').trim())
+
+  /** @brief 수능·모의고사 표준 구성 적용 (같은 번호·유형의 정답은 유지) */
+  const applyPreset = () => {
+    if (!preset) return
+    if (hasAnswers && !window.confirm(`문항 구성을 "${preset.label}"(으)로 바꿉니다. 번호와 유형이 같은 문항의 정답만 남고 나머지는 지워집니다. 계속할까요?`)) return
+    setDraftLayout(null)
+    onChange(prev => ({
+      ...prev,
+      questions: preset.questions.map(question => {
+        const old = prev.questions.find(item => item.no === question.no && item.type === question.type)
+        return old?.answer ? { ...question, answer: old.answer } : question
+      })
+    }))
+  }
+
+  /** @brief 한 문항의 유형을 다음 유형으로 바꿈 (객관식 → 단답형 → 서술형) */
+  const cycleType = no => {
+    setDraftLayout(null)
+    onChange(prev => ({
+      ...prev,
+      questions: prev.questions.map(question => {
+        if (question.no !== no) return question
+        const type = TYPE_ORDER[(TYPE_ORDER.indexOf(question.type) + 1) % TYPE_ORDER.length]
+        const keep = type !== 'choice' || /^[1-5]$/.test(String(question.answer ?? ''))
+        return { ...question, type, answer: keep ? question.answer : '' }
+      })
+    }))
+  }
 
   const setQuestion = (no, patch) => {
     onChange(prev => ({ ...prev, questions: prev.questions.map(question => question.no === no ? { ...question, ...patch } : question) }))
@@ -35,6 +73,7 @@ export default function AnswerKeyEditor({ paper, onChange }) {
   /** @brief 문항 구성 변경 - 같은 번호·유형의 기존 정답과 배점은 유지 */
   const applyLayout = () => {
     const fresh = buildQuestions(layout)
+    setDraftLayout(null)
     onChange(prev => ({
       ...prev,
       questions: fresh.map(question => {
@@ -72,6 +111,16 @@ export default function AnswerKeyEditor({ paper, onChange }) {
 
   return (
     <div className="space-y-6">
+      {preset && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--color-brand)]/20 bg-white px-4 py-3">
+          <div className="text-sm">
+            <b>{paper.meta.examType} 표준 구성</b> <span className="text-[var(--color-ink-soft)]">{preset.label}</span>
+            <span className="block text-xs text-[var(--color-ink-soft)]">현재: {describeComposition(paper.questions)}</span>
+          </div>
+          <button type="button" className="btn btn-primary !py-1.5 text-sm" onClick={applyPreset}>표준 구성 적용</button>
+        </div>
+      )}
+
       <div className="rounded-2xl bg-[var(--color-brand-soft)]/60 p-4 sm:p-5">
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
           <NumberField label="객관식" value={layout.choiceCount} onChange={choiceCount => setLayout({ ...layout, choiceCount })} />
@@ -97,16 +146,23 @@ export default function AnswerKeyEditor({ paper, onChange }) {
         {total !== 100 && (
           <button type="button" className="btn btn-ghost !py-1.5 text-xs" onClick={distributeTo100}>객관식 배점으로 100점 맞추기</button>
         )}
-        <span className="text-xs text-[var(--color-ink-soft)] sm:ml-auto">단답형에 정답이 여러 개면 <code className="px-1 rounded bg-white">|</code>로 구분 (예: 1/2|0.5)</span>
+        <span className="text-xs text-[var(--color-ink-soft)] sm:ml-auto">유형 칸을 누르면 그 문항의 유형이 바뀝니다 · 단답형 정답이 여러 개면 <code className="px-1 rounded bg-white">|</code>로 구분 (예: 1/2|0.5)</span>
       </div>
 
       <ol className="grid gap-2.5 md:grid-cols-2">
         {paper.questions.map(question => (
           <li key={question.no} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-[var(--color-line)] bg-white px-3 py-2.5">
             <span className="w-8 text-center font-extrabold text-lg tabular-nums">{question.no}</span>
-            <span className={`chip ${question.type === 'essay' ? '!bg-amber-100 !text-amber-800' : question.type === 'short' ? '!bg-emerald-100 !text-emerald-800' : ''}`}>
+            <button
+              type="button"
+              onClick={() => cycleType(question.no)}
+              title="눌러서 유형 바꾸기"
+              aria-label={`${question.no}번 유형 ${QUESTION_TYPES[question.type]}, 눌러서 바꾸기`}
+              className={`chip cursor-pointer hover:ring-2 hover:ring-[var(--color-brand)]/30 ${question.type === 'essay' ? '!bg-amber-100 !text-amber-800' : question.type === 'short' ? '!bg-emerald-100 !text-emerald-800' : ''}`}
+            >
               {QUESTION_TYPES[question.type]}
-            </span>
+            </button>
+            {question.elective && <span className="chip !bg-violet-100 !text-violet-800">선택</span>}
 
             {question.type === 'choice' ? (
               <div className="flex gap-1" role="radiogroup" aria-label={`${question.no}번 정답`}>

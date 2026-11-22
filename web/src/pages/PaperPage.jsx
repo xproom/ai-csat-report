@@ -14,6 +14,7 @@ import SolveViewer from '@/components/SolveViewer'
 import PaperCover from '@/components/PaperCover'
 import PerformanceView from '@/components/PerformanceView'
 import RunPanel from '@/components/RunPanel'
+import { applyAnswerKeyText } from '@/lib/answerKey'
 import { db } from '@/lib/db'
 import { formatRate, gradeRun, questionStats } from '@/lib/grading'
 import { makeId, paperTitle, QUESTION_TYPES } from '@/lib/schema'
@@ -56,6 +57,8 @@ export default function PaperPage({ paperId, tab, runId, edit }) {
   const paper = draft ?? stored ?? null
   const setPaper = next => setDraft(prev => (typeof next === 'function' ? next(prev ?? stored) : next))
   const [files, setFiles] = useState([])
+  // 정답·배점 탭에서 올렸지만 아직 반영하지 않은 정답표
+  const [pendingKey, setPendingKey] = useState(null)
   const runs = useMemo(() => allRuns.filter(run => run.paperId === paperId), [allRuns, paperId])
 
   useEffect(() => {
@@ -75,7 +78,18 @@ export default function PaperPage({ paperId, tab, runId, edit }) {
     )
   }
 
-  const setTab = next => navigate(`/paper/${paperId}?tab=${next}${runId && (next === 'omr' || next === 'sim') ? `&run=${runId}` : ''}`)
+  const setTab = next => {
+    if (pendingKey && next !== 'key') {
+      if (window.confirm(`올린 정답표(${pendingKey.fileName})를 아직 반영하지 않았습니다. 반영할까요?
+취소를 누르면 반영하지 않고 이동합니다.`)) {
+        const result = applyAnswerKeyText(paper, pendingKey.text, { fileName: pendingKey.fileName, restructure: 'auto' })
+        setPaper(result.paper)
+        notify(`정답 ${result.count}문항을 반영했습니다${result.restructured ? ' (문항 구성도 정답표에 맞춤)' : ''}.`)
+      }
+      setPendingKey(null)
+    }
+    navigate(`/paper/${paperId}?tab=${next}${runId && (next === 'omr' || next === 'sim') ? `&run=${runId}` : ''}`)
+  }
 
   const addFiles = async list => {
     const records = list.map((file, index) => ({ id: makeId('file'), paperId, name: file.name, type: file.type, size: file.size, blob: file, order: files.length + index }))
@@ -162,7 +176,7 @@ export default function PaperPage({ paperId, tab, runId, edit }) {
 
       {tab === 'key' && (
         <div className="space-y-6">
-          <AnswerKeyUpload paper={paper} onApply={next => { setPaper(next); notify('실제 정답을 반영했습니다. 모든 풀이가 새 정답으로 다시 채점됩니다.') }} />
+          <AnswerKeyUpload paper={paper} onPendingChange={setPendingKey} onApply={next => { setPaper(next); setPendingKey(null); notify('실제 정답을 반영했습니다. 모든 풀이가 새 정답으로 다시 채점됩니다.') }} />
           <div className="card p-4 sm:p-6">
             <h2 className="text-lg font-extrabold mb-4">문항 구성과 정답</h2>
             <AnswerKeyEditor key={paper.answerKeySource?.appliedAt ?? 'manual'} paper={paper} onChange={setPaper} />

@@ -14,6 +14,7 @@ import CoverOptionsForm from '@/components/CoverOptionsForm'
 import { FileUploader } from '@/components/FileUploader'
 import PaperCover from '@/components/PaperCover'
 import SolveViewer from '@/components/SolveViewer'
+import { applyAnswerKeyText } from '@/lib/answerKey'
 import { db } from '@/lib/db'
 import { createPaper, makeId, missingAnswers, paperTitle } from '@/lib/schema'
 import { navigate, useStore } from '@/lib/store'
@@ -29,21 +30,23 @@ export default function NewPaperPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const savedFileIds = useRef(new Set())
+  // 올렸지만 아직 반영하지 않은 정답표 { text, fileName }
+  const [pendingKey, setPendingKey] = useState(null)
   const missing = missingAnswers(paper)
   const runs = useMemo(() => allRuns.filter(run => run.paperId === paper.id), [allRuns, paper.id])
 
   const addFiles = list => setFiles(prev => [...prev, ...list.map(file => ({ id: makeId('file'), name: file.name, type: file.type, size: file.size, blob: file }))])
 
   /** @brief 지금 내용으로 평가지·문제지 저장 (처음 저장과 다시 저장 모두) */
-  const persist = async () => {
+  const persist = async (current = paper) => {
     const records = files.map((file, order) => ({ ...file, paperId: paper.id, order }))
     for (const record of records) await db.saveFile(record)
-    const current = new Set(records.map(record => record.id))
+    const keptIds = new Set(records.map(record => record.id))
     for (const id of savedFileIds.current) {
-      if (!current.has(id)) await db.deleteFile(id)
+      if (!keptIds.has(id)) await db.deleteFile(id)
     }
-    savedFileIds.current = current
-    const next = { ...paper, files: records.map(({ id, name, type, size }) => ({ id, name, type, size })) }
+    savedFileIds.current = keptIds
+    const next = { ...current, files: records.map(({ id, name, type, size }) => ({ id, name, type, size })) }
     await db.savePaper(next)
     await refresh()
     return records
@@ -51,9 +54,21 @@ export default function NewPaperPage() {
 
   const goTo = async index => {
     if (index !== AI_STEP) { setStep(index); return }
+    // 반영하지 않은 정답표가 있으면 반영할지 물음 (반영 안 하고 넘어가면 정답 없이 채점됨)
+    let current = paper
+    if (pendingKey) {
+      if (window.confirm(`올린 정답표(${pendingKey.fileName})를 아직 반영하지 않았습니다. 반영하고 넘어갈까요?
+취소를 누르면 정답 없이 넘어갑니다.`)) {
+        const result = applyAnswerKeyText(paper, pendingKey.text, { fileName: pendingKey.fileName, restructure: 'auto' })
+        current = result.paper
+        setPaper(current)
+        notify(`정답 ${result.count}문항을 반영했습니다${result.restructured ? ' (문항 구성도 정답표에 맞춤)' : ''}.`)
+      }
+      setPendingKey(null)
+    }
     setSaving(true)
     try {
-      const records = await persist()
+      const records = await persist(current)
       setFiles(records)
       if (!saved) notify('평가지를 저장했습니다. 이제 AI에게 풀게 할 수 있습니다.')
       setSaved(true)
@@ -123,7 +138,7 @@ export default function NewPaperPage() {
                   <FileUploader files={files} onAdd={addFiles} onRemove={id => setFiles(prev => prev.filter(file => file.id !== id))} />
                   <p className="text-xs text-[var(--color-ink-soft)]">정답이 함께 인쇄된 파일은 AI가 정답을 볼 수 있으니 문제만 있는 파일을 올리세요.</p>
                 </section>
-                <AnswerKeyUpload paper={paper} onApply={next => { setPaper(next); notify('실제 정답을 반영했습니다.') }} />
+                <AnswerKeyUpload paper={paper} onPendingChange={setPendingKey} onApply={next => { setPaper(next); setPendingKey(null); notify('실제 정답을 반영했습니다.') }} />
                 <section className="card p-4 sm:p-6">
                   <h2 className="text-lg font-extrabold mb-4">문항 구성과 정답</h2>
                   <AnswerKeyEditor key={paper.answerKeySource?.appliedAt ?? 'manual'} paper={paper} onChange={setPaper} />

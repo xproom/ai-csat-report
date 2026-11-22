@@ -3,6 +3,7 @@
  * @brief 평가지별 표지 옵션 입력 (학교급·학년·학기·시험 종류·과목·표지 테마·유의사항)
  */
 
+import { ELECTIVES, STANDARD_EXAM_TYPES, standardPreset } from '@/lib/presets'
 import { COVER_THEMES, EXAM_TYPES, GRADES, SCHOOL_LEVELS, SCHOOL_NAMES, SUBJECTS } from '@/lib/schema'
 
 function Segmented({ value, options, onChange, label }) {
@@ -23,7 +24,15 @@ function Segmented({ value, options, onChange, label }) {
 export default function CoverOptionsForm({ paper, onChange }) {
   const { meta, cover } = paper
   // 빠르게 연달아 바뀌어도 앞선 변경이 사라지지 않도록 항상 최신 값 기준으로 갱신
-  const setMeta = patch => onChange(prev => ({ ...prev, meta: { ...prev.meta, ...patch } }))
+  // 아직 정답을 하나도 넣지 않은 평가지는 수능·모의고사 과목을 고르면 표준 문항 구성을 자동으로 채움
+  const setMeta = patch => onChange(prev => {
+    const nextMeta = { ...prev.meta, ...patch }
+    const preset = standardPreset(nextMeta)
+    const untouched = !prev.questions.some(question => String(question.answer ?? '').trim())
+    // 학교급·시험 종류·과목이 바뀔 때만 (부제 입력 등에서는 문항 구성을 건드리지 않음)
+    const structural = ['schoolLevel', 'examType', 'subject'].some(key => key in patch && patch[key] !== prev.meta[key])
+    return preset && untouched && structural ? { ...prev, meta: nextMeta, questions: preset.questions } : { ...prev, meta: nextMeta }
+  })
   const setCover = patch => onChange(prev => ({ ...prev, cover: { ...prev.cover, ...patch } }))
 
   const changeLevel = level => {
@@ -37,6 +46,8 @@ export default function CoverOptionsForm({ paper, onChange }) {
   }
 
   const subjects = SUBJECTS[meta.schoolLevel]
+  const electives = meta.schoolLevel === '고등' && STANDARD_EXAM_TYPES.includes(meta.examType) ? ELECTIVES[meta.subject] ?? [] : []
+  const preset = standardPreset(meta)
 
   return (
     <div className="space-y-5">
@@ -77,6 +88,18 @@ export default function CoverOptionsForm({ paper, onChange }) {
           ))}
         </div>
       </div>
+
+      {electives.length > 0 && (
+        <div>
+          <span className="field-label">선택과목 (문제지에 여러 과목이 있으면 AI가 이 과목 부분을 풉니다)</span>
+          <Segmented label="선택과목" value={meta.elective ?? ''} options={[['', '정하지 않음'], ...electives.map(name => [name, name])]} onChange={elective => setMeta({ elective })} />
+        </div>
+      )}
+      {preset && (
+        <p className="rounded-lg bg-[var(--color-brand-soft)] px-3 py-2 text-xs">
+          <b>{meta.examType} 표준 구성:</b> {preset.label}. 정답을 넣기 전이면 자동으로 채워지고, 정답표를 올리면 정답표에 맞춰집니다.
+        </p>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <label className="block">

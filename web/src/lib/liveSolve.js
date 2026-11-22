@@ -19,6 +19,7 @@ import { blobToBase64 } from './db.js'
 import { normalizeChoice } from './grading.js'
 import { makeId, QUESTION_TYPES } from './schema.js'
 import { CLAUDE_MODELS, MAX_REQUEST_BYTES, describeApiError, estimateRequestBytes } from './aiRunner.js'
+import { electiveNote } from './presets.js'
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const MAX_THINK_CHARS = 700
@@ -148,7 +149,8 @@ export function cleanFinalAnswer(question, text) {
 
 function questionPrompt(paper, question) {
   const detail = question.type === 'choice' ? `${question.choices}지선다 객관식` : QUESTION_TYPES[question.type]
-  return `이 시험은 모두 ${paper.questions.length}문항입니다. ${question.no}번 문항(${detail}, ${question.points}점)만 풀어 주세요.`
+  const note = electiveNote(paper, question)
+  return `이 시험은 모두 ${paper.questions.length}문항입니다. ${question.no}번 문항(${detail}, ${question.points}점)만 풀어 주세요.${note ? ` ${note}` : ''}`
 }
 
 /** @brief 업로드 파일 → 콘텐츠 블록 (마지막 블록에 캐시 지점) */
@@ -195,7 +197,7 @@ export async function locateQuestions({ client, modelInfo, blocks, paper, signal
     output_config: { effort: 'low', format: { type: 'json_schema', schema: PAGE_MAP_SCHEMA } },
     messages: [{
       role: 'user',
-      content: [...blocks, { type: 'text', text: `문항 번호 ${paper.questions.map(question => question.no).join(', ')}이 각각 몇 번째 첨부 파일(1부터)의 몇 쪽(1부터)에 있는지 알려 주세요. 찾을 수 없는 번호는 빼세요.` }]
+      content: [...blocks, { type: 'text', text: `문항 번호 ${paper.questions.map(question => question.no).join(', ')}이 각각 몇 번째 첨부 파일(1부터)의 몇 쪽(1부터)에 있는지 알려 주세요. 찾을 수 없는 번호는 빼세요. ${electiveNote(paper)}` }]
     }]
   }, { signal })
   const text = response.content.filter(block => block.type === 'text').map(block => block.text).join('')

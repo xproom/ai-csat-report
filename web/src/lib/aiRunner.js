@@ -10,6 +10,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { blobToBase64 } from './db.js'
 import { makeId, QUESTION_TYPES } from './schema.js'
+import { electiveNote, electiveOf } from './presets.js'
 
 export const CLAUDE_MODELS = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', fallback: true },
@@ -91,7 +92,8 @@ function describeQuestions(paper) {
     .map(question => {
       const type = QUESTION_TYPES[question.type]
       const detail = question.type === 'choice' ? `${question.choices}지선다` : type
-      return `${question.no}번: ${detail} (${question.points}점)`
+      const elective = question.elective && electiveOf(paper) ? ` - 선택과목 ${electiveOf(paper)} 부분` : ''
+      return `${question.no}번: ${detail} (${question.points}점)${elective}`
     })
     .join('\n')
 }
@@ -231,7 +233,7 @@ export async function readAnswerKeyWithClaude({ apiKey, model = CLAUDE_MODELS[0]
     modelInfo,
     effort: 'low',
     system: KEY_READER_PROMPT,
-    content: [block, { type: 'text', text: `이 시험은 ${paper.questions.length}문항입니다.\n${describeQuestions(paper)}` }],
+    content: [block, { type: 'text', text: `이 시험은 ${paper.questions.length}문항입니다. ${electiveNote(paper)}\n${describeQuestions(paper)}` }],
     signal
   })
   return text
