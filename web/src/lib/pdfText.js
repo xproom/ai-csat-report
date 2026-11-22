@@ -8,6 +8,7 @@
  */
 
 import { openPdf } from './pdfRender.js'
+import { formTypeOf } from './schema.js'
 
 /** 문항 번호 모양: "1." "12." (뒤에 글자가 이어져도 됨) */
 const ANCHOR_PATTERN = /^\s*(\d{1,2})\s*[.．]\s*(?:\S|$)/
@@ -100,16 +101,22 @@ const indexCache = new Map()
  */
 export async function buildQuestionIndex(file, paper) {
   if (file?.type !== 'application/pdf') return null
-  const key = `${file.id}:${paper.questions.length}:${paper.meta?.elective ?? ''}`
+  const form = formTypeOf(paper.meta)
+  const key = `${file.id}:${paper.questions.length}:${paper.meta?.elective ?? ''}:${form}`
   if (indexCache.has(key)) return indexCache.get(key)
   const promise = (async () => {
     const pdf = await openPdf(file)
     const maxNo = Math.max(...paper.questions.map(question => question.no))
-    const pages = []
+    const allPages = []
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const items = await pageItems(pdf, pageNumber)
-      pages.push({ pageNumber, items, anchors: findAnchors(items, maxNo), text: items.map(item => item.str).join('').replace(/\s+/g, '') })
+      const raw = items.map(item => item.str).join('')
+      allPages.push({ pageNumber, items, anchors: findAnchors(items, maxNo), text: raw.replace(/\s+/g, ''), form: pageFormType(raw), fileName: file.name })
     }
+    // 한 파일에 홀수형·짝수형이 함께 있으면 평가지의 형 쪽에서만 문항을 찾음
+    const forms = assignPageForms(allPages)
+    const both = forms.includes('홀수형') && forms.includes('짝수형')
+    const pages = both && form ? allPages.filter((_, i) => forms[i] === form) : allPages
     // 문항 번호마다 나온 자리 (홀수형·짝수형이나 선택과목처럼 여러 번 나올 수 있음)
     const occurrences = new Map()
     for (const page of pages) {
@@ -227,34 +234,57 @@ export function pageNumberCandidates(items) {
 export async function extractPaperFacts(files, paper) {
   const pdfFiles = files.filter(file => file?.type === 'application/pdf')
   const maxNo = Math.max(1, ...paper.questions.map(question => question.no))
-  const pages = []
-  const segments = []
-  let allText = ''
+
+  // 1) 모든 쪽의 글자와 홀수형·짝수형 표시를 읽음
+  const all = []
   let index = 0
-  let current = null
   for (const file of pdfFiles) {
     const pdf = await openPdf(file)
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       index += 1
       const items = await pageItems(pdf, pageNumber)
       const text = items.map(item => item.str).join('')
-      allText += `${text}
-`
-      pages.push({ index, fileName: file.name, page: pageNumber, candidates: pageNumberCandidates(items), compact: text.replace(/\s+/g, '') })
-      const anchors = findAnchors(items, maxNo)
-      const anchorItems = new Map(anchors.map(anchor => [anchor.item, anchor.no]))
-      const body = items.filter(item => item.top > 0.04 && item.top < 0.94)
-      const twoColumns = anchors.some(anchor => anchor.col === 1)
-      const ordered = twoColumns
-        ? [...readingOrder(body.filter(item => item.x0 < 0.5)), ...readingOrder(body.filter(item => item.x0 >= 0.5))]
-        : readingOrder(body)
-      for (const item of ordered) {
-        if (anchorItems.has(item)) {
-          current = { no: anchorItems.get(item), index, parts: [] }
-          segments.push(current)
-        }
-        current?.parts.push(item.str)
+      all.push({ index, fileName: file.name, page: pageNumber, items, text, compact: text.replace(/\s+/g, ''), form: pageFormType(text) })
+    }
+  }
+  const forms = assignPageForms(all)
+  const oddFound = forms.includes('홀수형')
+  const evenFound = forms.includes('짝수형')
+
+  // 2) 한 파일에 홀수형·짝수형이 함께 있으면 평가지의 형 쪽만 검사 (쪽 번호도 형마다 1쪽부터)
+  const selected = formTypeOf(paper.meta)
+  const keep = oddFound && evenFound && selected ? all.filter((page, i) => forms[i] === selected) : all
+  const pages = keep.length ? keep : all
+  const sectionPage = new Map()
+  const pagesOut = pages.map(page => {
+    const section = oddFound && evenFound ? `${page.fileName} (${forms[all.indexOf(page)]})` : page.fileName
+    sectionPage.set(section, (sectionPage.get(section) ?? 0) + 1)
+    return { index: page.index, fileName: section, page: sectionPage.get(section), candidates: pageNumberCandidates(page.items) }
+  })
+
+  // 3) 읽는 순서대로 문항 글을 나눔. 번호가 앞 문항보다 작아지면(지문 속 "1. 2." 목록 등) 문항 번호로 보지 않음
+  //    선택과목 첫 번호(예: 국어 35, 수학 23)로 돌아가는 것만 허용
+  const electiveFirst = Math.min(...paper.questions.filter(question => question.elective).map(question => question.no))
+  const segments = []
+  let current = null
+  let lastNo = 0
+  for (const page of pages) {
+    const anchors = findAnchors(page.items, maxNo)
+    const anchorItems = new Map(anchors.map(anchor => [anchor.item, anchor.no]))
+    const body = page.items.filter(item => item.top > 0.04 && item.top < 0.94)
+    const twoColumns = anchors.some(anchor => anchor.col === 1)
+    const ordered = twoColumns
+      ? [...readingOrder(body.filter(item => item.x0 < 0.5)), ...readingOrder(body.filter(item => item.x0 >= 0.5))]
+      : readingOrder(body)
+    for (const item of ordered) {
+      const no = anchorItems.get(item)
+      const accepted = no != null && (no >= lastNo || (no === electiveFirst && lastNo >= electiveFirst))
+      if (accepted) {
+        current = { no, index: page.index, parts: [] }
+        segments.push(current)
+        lastNo = no
       }
+      current?.parts.push(item.str)
     }
   }
 
@@ -267,17 +297,39 @@ export async function extractPaperFacts(files, paper) {
     if (!chosen) continue
     questions[question.no] = { index: chosen.index, ...analyzeQuestionText(chosen.parts.join(' ')) }
   }
+  const allText = pages.map(page => page.text).join('\n')
   const defaultPoints = allText.match(DEFAULT_POINTS_PATTERN)
+  const keptForms = [...new Set(pages.map(page => forms[all.indexOf(page)]).filter(Boolean))]
   return {
     source: 'pdf',
     createdAt: new Date().toISOString(),
     fileKey: pdfFiles.map(file => file.id).join(','),
-    pageCount: index,
+    pageCount: pages.length,
+    totalPageCount: all.length,
     readable: allText.replace(/\s+/g, '').length > 40,
-    pages: pages.map(page => ({ index: page.index, fileName: page.fileName, page: page.page, candidates: page.candidates })),
+    pages: pagesOut,
     anchors: segments.map(segment => ({ no: segment.no, index: segment.index })),
     questions,
     defaultPoints: defaultPoints ? Number(defaultPoints[1]) : 0,
+    // 검사한 쪽의 형 (한 파일에 두 형이 있으면 고른 형 쪽만 검사했으므로 그 형)
+    formType: keptForms.length === 1 ? keptForms[0] : '',
+    bothForms: oddFound && evenFound,
+    checkedPages: oddFound && evenFound ? `${pages[0].index}~${pages.at(-1).index}쪽` : '',
     electiveStart: electiveStart ?? 0
   }
+}
+
+/** @brief 한 쪽에 인쇄된 형 표시 ('홀수형' | '짝수형' | '') */
+function pageFormType(text) {
+  const odd = /홀\s*수\s*형/.test(text)
+  const even = /짝\s*수\s*형/.test(text)
+  return odd === even ? '' : odd ? '홀수형' : '짝수형'
+}
+
+/** @brief 형 표시가 없는 쪽은 앞쪽(없으면 뒤쪽)의 형을 이어받음 */
+function assignPageForms(pages) {
+  const forms = pages.map(page => page.form)
+  for (let i = 1; i < forms.length; i += 1) if (!forms[i] && pages[i].fileName === pages[i - 1].fileName) forms[i] = forms[i - 1]
+  for (let i = forms.length - 2; i >= 0; i -= 1) if (!forms[i] && pages[i].fileName === pages[i + 1].fileName) forms[i] = forms[i + 1]
+  return forms
 }

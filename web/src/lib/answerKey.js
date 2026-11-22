@@ -11,6 +11,7 @@
 
 import { normalizeChoiceSet } from './grading.js'
 import { questionsFromAnswerKey } from './presets.js'
+import { formTypeOf } from './schema.js'
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩'
 
@@ -29,7 +30,9 @@ function normalizeFor(question, value) {
   return question.type === 'choice' ? normalizeChoiceSet(text) : text
 }
 
-function fromJson(data) {
+function fromJson(data, formType = '') {
+  // {"홀수형": {...}, "짝수형": {...}} 형태면 평가지의 형만
+  if (formType && data && !Array.isArray(data) && (data['홀수형'] || data['짝수형'])) data = data[formType] ?? data['홀수형'] ?? data['짝수형']
   const source = Array.isArray(data) ? data : data?.answers ?? data
   const entries = []
   if (Array.isArray(source)) {
@@ -46,6 +49,41 @@ function fromJson(data) {
 
 /** @brief "번호 구분자 정답 [배점]" 형태의 줄 */
 const LINE_PATTERN = /^\s*(\d{1,3})\s*(?:번|\.|\)|:|,|\t|-|=|\s)\s*([^,\t]+?)\s*(?:[,\t]\s*([\d.]+)\s*점?)?\s*$/
+
+/**
+ * @brief 머리글에 홀수형·짝수형 열이 함께 있는 표 ("번호,홀수형,짝수형[,배점]")
+ * @returns {{ entries, column: string }|null}
+ */
+function fromFormColumns(text, formType) {
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const header = lines.find(line => /홀/.test(line) && /짝/.test(line) && /[,\t]/.test(line))
+  if (!header) return null
+  const cells = line => line.split(/\s*[,\t]\s*/)
+  const columns = cells(header)
+  const wanted = columns.findIndex(column => (formType === '짝수형' ? /짝/ : /홀/).test(column))
+  const pointsColumn = columns.findIndex(column => /배점|점수/.test(column))
+  if (wanted < 0) return null
+  const entries = []
+  for (const line of lines) {
+    if (line === header) continue
+    const row = cells(line)
+    const no = Number(String(row[0]).replace(/번$/, ''))
+    if (!Number.isInteger(no) || !row[wanted]) continue
+    entries.push({ no, answer: row[wanted], points: pointsColumn >= 0 && row[pointsColumn] ? Number(row[pointsColumn]) : undefined })
+  }
+  return { entries, column: columns[wanted] }
+}
+
+/** @brief 정답표가 어느 형인지 짐작 (표에서 고른 열 → 글·파일 이름에 한쪽 형만 있는 경우) */
+function detectFormType(text, fileName, column) {
+  if (column) return /짝/.test(column) ? '짝수형' : '홀수형'
+  const odd = /홀수\s*형/.test(text)
+  const even = /짝수\s*형/.test(text)
+  if (odd !== even) return odd ? '홀수형' : '짝수형'
+  if (/짝수|even/i.test(fileName ?? '')) return '짝수형'
+  if (/홀수|odd/i.test(fileName ?? '')) return '홀수형'
+  return ''
+}
 
 function fromLines(text) {
   const entries = []
@@ -79,19 +117,31 @@ function fromSequence(text) {
  * @returns {{ entries: Array<{ no, answer, points? }>, allEntries: Array<{ no, answer, points?, circled }>, format: string, unknownNos: number[] }}
  *   entries는 평가지에 있는 번호만, allEntries는 정답표의 모든 번호 (문항 구성을 정답표에 맞출 때 사용)
  */
-export function parseAnswerKey(text, paper) {
+export function parseAnswerKey(text, paper, { fileName = '' } = {}) {
   // trim()은 파일 앞의 BOM도 함께 제거함
   const trimmed = String(text ?? '').trim()
   if (!trimmed) return { entries: [], allEntries: [], format: 'empty', unknownNos: [] }
 
+  const paperForm = formTypeOf(paper.meta)
   let entries = []
   let format = ''
+  let column = ''
   if (/^[[{]/.test(trimmed)) {
     try {
-      entries = fromJson(JSON.parse(trimmed))
+      const data = JSON.parse(trimmed)
+      if (data && (data['홀수형'] || data['짝수형'])) column = data[paperForm] ? paperForm : data['홀수형'] ? '홀수형' : '짝수형'
+      entries = fromJson(data, paperForm || column)
       format = 'JSON'
     } catch {
       entries = []
+    }
+  }
+  if (!entries.length) {
+    const table = fromFormColumns(trimmed, paperForm || '홀수형')
+    if (table?.entries.length) {
+      entries = table.entries
+      column = table.column
+      format = `홀수형·짝수형 표 (${table.column} 열)`
     }
   }
   if (!entries.length) {
@@ -138,7 +188,7 @@ export function parseAnswerKey(text, paper) {
       points: Number.isFinite(entry.points) && entry.points > 0 ? entry.points : undefined
     })
   }
-  return { entries: [...merged.values()].sort((a, b) => a.no - b.no), allEntries, format, unknownNos: [...new Set(unknownNos)], duplicateNos: [...duplicateNos].sort((a, b) => a - b) }
+  return { entries: [...merged.values()].sort((a, b) => a.no - b.no), allEntries, format, unknownNos: [...new Set(unknownNos)], duplicateNos: [...duplicateNos].sort((a, b) => a - b), formType: detectFormType(trimmed, fileName, column) }
 }
 
 /**
@@ -168,7 +218,7 @@ export function applyAnswerKey(paper, entries, { fileName = '', applyPoints = tr
     questions: paper.questions.map(question => {
       const entry = byNo.get(question.no)
       if (!entry) return question
-      return { ...question, answer: entry.answer, ...(applyPoints && entry.points ? { points: entry.points } : {}) }
+      return { ...question, answer: entry.answer, ...(applyPoints && entry.points ? { points: entry.points, pointsEstimated: false } : {}) }
     }),
     answerKeySource: { type: 'upload', fileName, appliedAt: new Date().toISOString(), count: entries.length, ...keyNumbering(parsed) }
   }
@@ -177,7 +227,7 @@ export function applyAnswerKey(paper, entries, { fileName = '', applyPoints = tr
 /** @brief 정답표에 적힌 번호 목록과 중복 번호 (문항 번호 검증용) */
 function keyNumbering(parsed) {
   if (!parsed) return {}
-  return { nos: parsed.allEntries.map(entry => entry.no), duplicateNos: parsed.duplicateNos ?? [] }
+  return { nos: parsed.allEntries.map(entry => entry.no), duplicateNos: parsed.duplicateNos ?? [], ...(parsed.formType ? { formType: parsed.formType } : {}) }
 }
 
 /**
@@ -201,7 +251,7 @@ export function proposeStructure(paper, parsed) {
  * @returns {{ paper: Object, restructured: boolean, count: number }}
  */
 export function applyAnswerKeyText(paper, text, { fileName = '', restructure = 'auto', applyPoints = true } = {}) {
-  const parsed = parseAnswerKey(text, paper)
+  const parsed = parseAnswerKey(text, paper, { fileName })
   const proposal = proposeStructure(paper, parsed)
   const useStructure = restructure === 'always' || (restructure === 'auto' && proposal.differs)
   if (useStructure && proposal.questions.length) {

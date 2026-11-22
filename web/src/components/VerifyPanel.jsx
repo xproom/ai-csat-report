@@ -10,8 +10,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CLAUDE_MODELS, verifyPaperWithClaude } from '@/lib/aiRunner'
 import { extractPaperFacts } from '@/lib/pdfText'
+import { formTypeOf } from '@/lib/schema'
 import { getApiKey } from '@/lib/settings'
-import { LEVEL_LABEL, composition, mergeFacts, targetTotal, validatePaper } from '@/lib/verify'
+import { LEVEL_LABEL, applyPrintedPoints, composition, mergeFacts, targetTotal, validatePaper } from '@/lib/verify'
 
 const LEVEL_STYLE = {
   error: { chip: 'bg-red-50 text-[var(--color-pen)] border-red-200', dot: 'bg-[var(--color-pen)]', icon: '✕' },
@@ -23,9 +24,15 @@ const LEVEL_STYLE = {
 const STATUS_TEXT = { error: '고칠 곳이 있습니다', warn: '확인이 필요한 곳이 있습니다', ok: '검증을 통과했습니다' }
 
 /** @brief 문제지를 다시 읽어야 하는지 판단하는 키 (파일·문항 수·선택과목이 바뀌면 다시 읽음) */
+/** @brief 표준 구성의 짐작 배점을 문제지의 [N점] 표시로 맞춘 평가지 (바꿀 것이 없으면 그대로) */
+function withPrintedPoints(paper) {
+  const facts = mergeFacts(paper.verification?.pdf ?? null, paper.verification?.ai ?? null)
+  return applyPrintedPoints(paper, facts) ?? paper
+}
+
 function factsKey(files, paper) {
   const pdfs = files.filter(file => file.type === 'application/pdf').map(file => file.id).join(',')
-  return pdfs ? `${pdfs}|${paper.questions.length}|${paper.meta?.elective ?? ''}` : ''
+  return pdfs ? `${pdfs}|${paper.questions.length}|${paper.meta?.elective ?? ''}|${formTypeOf(paper.meta)}` : ''
 }
 
 export function LevelBadge({ level, children }) {
@@ -76,7 +83,7 @@ export default function VerifyPanel({ paper, files, runs = [], onChange, onEditQ
     extractPaperFacts(pdfs, paper)
       .then(facts => {
         if (cancelled) return
-        onChange(prev => ({ ...prev, verification: { ...(prev.verification ?? {}), pdf: { ...facts, key } } }))
+        onChange(prev => withPrintedPoints({ ...prev, verification: { ...(prev.verification ?? {}), pdf: { ...facts, key } } }))
       })
       .catch(err => { if (!cancelled) setError(err?.message || '문제지를 읽지 못했습니다.') })
       .finally(() => { if (!cancelled) setReading(false) })
@@ -98,7 +105,7 @@ export default function VerifyPanel({ paper, files, runs = [], onChange, onEditQ
     abortRef.current = controller
     try {
       const facts = await verifyPaperWithClaude({ apiKey: getApiKey(), model, paper, files, signal: controller.signal })
-      onChange(prev => ({ ...prev, verification: { ...(prev.verification ?? {}), ai: { ...facts, key } } }))
+      onChange(prev => withPrintedPoints({ ...prev, verification: { ...(prev.verification ?? {}), ai: { ...facts, key } } }))
     } catch (err) {
       if (!controller.signal.aborted) setError(err?.message || 'AI 정밀 검증에 실패했습니다.')
     } finally {

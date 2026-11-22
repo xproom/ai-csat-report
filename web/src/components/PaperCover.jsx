@@ -4,7 +4,7 @@
  * @note 글자 크기는 컨테이너 너비(cqw) 기준이라 어떤 크기에서도 비율이 유지됩니다.
  */
 
-import { COVER_THEMES, SCHOOL_NAMES, countByType, totalPoints } from '@/lib/schema'
+import { COVER_THEMES, SCHOOL_NAMES, countByType, formTypeOf, totalPoints } from '@/lib/schema'
 
 export default function PaperCover({ paper, compact = false }) {
   const { meta, cover } = paper
@@ -37,6 +37,9 @@ export default function PaperCover({ paper, compact = false }) {
             <div className="font-serif" style={{ fontSize: compact ? '13cqw' : '12cqw', fontWeight: 800, lineHeight: 1.15, marginTop: '1.5cqw', letterSpacing: '0.08em' }}>
               {meta.subject}
             </div>
+            {formTypeOf(meta) && (
+              <div className="inline-block" style={{ fontSize: '3.8cqw', marginTop: '2cqw', padding: '0.6cqw 2.4cqw', fontWeight: 800, border: `0.45cqw solid ${theme.ink}`, letterSpacing: '0.1em' }}>{formTypeOf(meta)}</div>
+            )}
             {meta.elective && (
               <div style={{ fontSize: '3.6cqw', marginTop: '1cqw', fontWeight: 700, opacity: 0.85 }}>선택과목 · {meta.elective}</div>
             )}

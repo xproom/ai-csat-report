@@ -69,3 +69,14 @@ test('선택과목 안내는 선택과목 문항과 시험 전체에 들어감',
   paper.meta.elective = ''
   assert.equal(electiveNote(paper), '')
 })
+
+test('수능형 평가지 제목에 홀수형·짝수형', async () => {
+  const { paperTitle, formTypeOf } = await import('../src/lib/schema.js')
+  const paper = createPaper()
+  paper.meta = { ...paper.meta, ...meta('수학') }
+  assert.equal(formTypeOf(paper.meta), '홀수형')
+  assert.match(paperTitle(paper), /수능 수학 \(홀수형\)$/)
+  paper.meta.formType = '짝수형'
+  assert.match(paperTitle(paper), /\(짝수형\)$/)
+  assert.equal(formTypeOf({ ...paper.meta, examType: '중간고사' }), '')
+})

@@ -51,11 +51,6 @@ export default function Layout({ route, children }) {
       <header className="sticky top-0 z-30 backdrop-blur bg-[var(--color-paper)]/85 border-b border-[var(--color-line)]">
         <div className="mx-auto max-w-6xl px-4 h-16 flex items-center justify-between gap-4">
           <Logo />
-          <div className="flex items-center gap-2">
-          <a href="#/settings" className={`hidden sm:inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${cloud.user ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-[var(--color-line)] bg-white text-[var(--color-ink-soft)]'}`} title={cloud.user ? `${cloud.user.email} · 서버에 저장 중` : '이 브라우저에만 저장 중'}>
-            <span className={`w-2 h-2 rounded-full ${cloud.user ? 'bg-emerald-600' : 'bg-[#b9b2a3]'}`} aria-hidden="true" />
-            {cloud.user ? '서버 저장' : cloud.configured ? '로그인' : '브라우저 저장'}
-          </a>
           <nav className="hidden md:flex items-center gap-1" aria-label="주 메뉴">
             {NAV.map(item => (
               <a
@@ -70,7 +65,6 @@ export default function Layout({ route, children }) {
               </a>
             ))}
           </nav>
-          </div>
         </div>
       </header>
 

@@ -9,8 +9,8 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { blobToBase64 } from './db.js'
-import { makeId, QUESTION_TYPES } from './schema.js'
-import { electiveNote, electiveOf } from './presets.js'
+import { formTypeOf, makeId, QUESTION_TYPES } from './schema.js'
+import { electiveNote, electiveOf, formNote } from './presets.js'
 
 export const CLAUDE_MODELS = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', fallback: true },
@@ -137,7 +137,7 @@ export async function runClaudeOnPaper({ apiKey, model, effort = 'high', paper, 
     system: SYSTEM_PROMPT,
     content: [
       ...blocks,
-      { type: 'text', text: `문항 구성:\n${describeQuestions(paper)}\n\n위 ${paper.questions.length}개 문항의 답을 모두 제출하세요.` }
+      { type: 'text', text: `문항 구성:\n${describeQuestions(paper)}\n\n위 ${paper.questions.length}개 문항의 답을 모두 제출하세요. ${formNote(paper)}` }
     ],
     signal
   })
@@ -233,7 +233,7 @@ export async function readAnswerKeyWithClaude({ apiKey, model = CLAUDE_MODELS[0]
     modelInfo,
     effort: 'low',
     system: KEY_READER_PROMPT,
-    content: [block, { type: 'text', text: `이 시험은 ${paper.questions.length}문항입니다. ${electiveNote(paper)}\n${describeQuestions(paper)}` }],
+    content: [block, { type: 'text', text: `이 시험은 ${paper.questions.length}문항입니다. ${formTypeOf(paper.meta) ? `이 평가지는 ${formTypeOf(paper.meta)}입니다. 정답표에 홀수형과 짝수형이 함께 있으면 ${formTypeOf(paper.meta)} 정답만 옮겨 적으세요. ` : ''}${electiveNote(paper)}\n${describeQuestions(paper)}` }],
     signal
   })
   return text
@@ -340,9 +340,10 @@ const VERIFY_SCHEMA = {
       }
     },
     defaultPoints: { type: 'number', description: '"점수 표시가 없는 문항은 모두 2점"처럼 안내가 있으면 그 점수, 없으면 0' },
+    formType: { type: 'string', enum: ['홀수형', '짝수형', '없음'], description: '문제지에 인쇄된 형 (수능·모의평가 문제지 위쪽의 "홀수형"·"짝수형" 표시), 없으면 "없음"' },
     notes: { type: 'array', items: { type: 'string' }, description: '인쇄 오류·오탈자·문항 번호 이상 등 눈에 띈 문제 (없으면 빈 배열)' }
   },
-  required: ['pages', 'questions', 'defaultPoints', 'notes'],
+  required: ['pages', 'questions', 'defaultPoints', 'formType', 'notes'],
   additionalProperties: false
 }
 
@@ -368,7 +369,7 @@ export async function verifyPaperWithClaude({ apiKey, model = CLAUDE_MODELS[0].i
     effort: 'medium',
     system: VERIFY_PROMPT,
     schema: VERIFY_SCHEMA,
-    content: [...blocks, { type: 'text', text: `교사가 입력한 문항 구성(참고용, 문제지와 다르면 문제지 그대로 적을 것): ${paper.questions.length}문항\n${describeQuestions(paper)}` }],
+    content: [...blocks, { type: 'text', text: `${formTypeOf(paper.meta) ? `첨부한 문제지에 홀수형과 짝수형이 함께 있으면 ${formTypeOf(paper.meta)} 부분만 읽으세요. ` : ''}교사가 입력한 문항 구성(참고용, 문제지와 다르면 문제지 그대로 적을 것): ${paper.questions.length}문항\n${describeQuestions(paper)}` }],
     signal
   })
   let data
@@ -410,6 +411,7 @@ export async function verifyPaperWithClaude({ apiKey, model = CLAUDE_MODELS[0].i
     anchors: (data.questions ?? []).map(item => ({ no: item.no, index: item.page })),
     questions,
     defaultPoints: Number(data.defaultPoints) || 0,
+    formType: data.formType === '홀수형' || data.formType === '짝수형' ? data.formType : '',
     notes: data.notes ?? []
   }
 }

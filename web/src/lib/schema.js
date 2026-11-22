@@ -4,7 +4,8 @@
  *
  * Paper {
  *   id, createdAt, updatedAt,
- *   meta: { schoolLevel, grade, semester, examType, subject, year, schoolName, title, durationMin, note },
+ *   meta: { schoolLevel, grade, semester, examType, subject, year, schoolName, title, durationMin, note, formType },
+ *         formType: 수능·모의평가·모의고사 문제지의 '홀수형' | '짝수형' (정답이 형마다 다름)
  *   cover: { theme, notices: string[], showSchool },
  *   questions: [{ no, type: 'choice'|'short'|'essay', choices: 4|5, points, answer, unit }],
  *   files: [{ id, name, type, size }]     // 파일 본문은 files 저장소에 따로 보관
@@ -27,6 +28,21 @@ export const SUBJECTS = {
   초등: ['국어', '수학', '사회', '과학', '영어', '도덕'],
   중등: ['국어', '수학', '영어', '사회', '역사', '과학', '도덕', '기술·가정', '정보', '한문'],
   고등: ['국어', '수학', '영어', '한국사', '통합사회', '통합과학', '물리학', '화학', '생명과학', '지구과학', '사회·문화', '생활과 윤리', '윤리와 사상', '한국지리', '세계지리', '동아시아사', '세계사', '경제', '정치와 법', '정보', '제2외국어']
+}
+
+/** 수능형 문제지의 형 (홀수형·짝수형은 선지 배열이 달라 정답이 다름) */
+export const FORM_TYPES = ['홀수형', '짝수형']
+const FORM_EXAM_TYPES = ['수능', '모의평가', '모의고사']
+
+/** @brief 홀수형·짝수형을 나누는 시험인지 (고등 수능·모의평가·모의고사) */
+export function usesFormType(meta = {}) {
+  return meta.schoolLevel === '고등' && FORM_EXAM_TYPES.includes(meta.examType)
+}
+
+/** @brief 평가지의 형 (나누는 시험이면 기본 홀수형, 아니면 빈 문자열) */
+export function formTypeOf(meta = {}) {
+  if (!usesFormType(meta)) return ''
+  return FORM_TYPES.includes(meta.formType) ? meta.formType : '홀수형'
 }
 
 /** 학교급 → 표지·제목에 쓰는 이름 */
@@ -103,9 +119,10 @@ export function createPaper(overrides = {}) {
 /** @brief 표지·목록에 쓰는 평가지 제목 */
 export function paperTitle(paper) {
   const { meta } = paper
+  const form = formTypeOf(meta)
   if (meta.title?.trim()) return meta.title.trim()
   const level = SCHOOL_NAMES[meta.schoolLevel] ?? '중학교'
-  return `${level} ${meta.grade}학년 ${meta.semester}학기 ${meta.examType} ${meta.subject}`
+  return `${level} ${meta.grade}학년 ${meta.semester}학기 ${meta.examType} ${meta.subject}${form ? ` (${form})` : ''}`
 }
 
 /** @brief 평가지 총점 */

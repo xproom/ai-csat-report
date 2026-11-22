@@ -6,6 +6,7 @@
  */
 
 import { normalizeChoiceSet } from './grading.js'
+import { formTypeOf } from './schema.js'
 
 /** 표준 구성을 쓰는 시험 종류 */
 export const STANDARD_EXAM_TYPES = ['수능', '모의고사', '모의평가']
@@ -24,11 +25,12 @@ function points2or3(count, threeCount) {
   return no => (threes.has(no) ? 3 : 2)
 }
 
+// 표준 구성의 배점은 짐작값이라 pointsEstimated로 표시 (문제지의 [N점] 표시를 읽으면 그 값으로 바뀜)
 function choice(no, points, extra = {}) {
-  return { no, type: 'choice', choices: 5, points, answer: '', unit: '', ...extra }
+  return { no, type: 'choice', choices: 5, points, pointsEstimated: true, answer: '', unit: '', ...extra }
 }
 function short(no, points, extra = {}) {
-  return { no, type: 'short', choices: 5, points, answer: '', unit: '', ...extra }
+  return { no, type: 'short', choices: 5, points, pointsEstimated: true, answer: '', unit: '', ...extra }
 }
 
 /** 수능 수학: 공통 1~15 객관식·16~22 단답, 선택 23~28 객관식·29~30 단답 (공통 74점 + 선택 26점) */
@@ -92,12 +94,14 @@ export function questionsFromAnswerKey(entries, meta) {
       const text = String(entry.answer ?? '').trim()
       const looksChoice = entry.circled || /^[1-5]$/.test(text)
       const type = base?.type ?? (looksChoice ? 'choice' : 'short')
-      const points = Number.isFinite(entry.points) && entry.points > 0 ? entry.points : base?.points ?? (type === 'choice' ? 3 : 4)
+      const keyPoints = Number.isFinite(entry.points) && entry.points > 0
+      const points = keyPoints ? entry.points : base?.points ?? (type === 'choice' ? 3 : 4)
       return {
         no: entry.no,
         type,
         choices: base?.choices ?? 5,
         points,
+        ...(keyPoints ? {} : { pointsEstimated: true }),
         answer: type === 'choice' ? normalizeChoiceSet(text) : text,
         unit: '',
         ...(base?.elective ? { elective: true } : {})
@@ -133,4 +137,13 @@ export function electiveNote(paper, question = null) {
   const electiveNos = (paper.questions ?? []).filter(item => item.elective).map(item => item.no)
   const range = electiveNos.length ? `${Math.min(...electiveNos)}~${Math.max(...electiveNos)}번` : '선택과목 문항'
   return `응시한 선택과목은 "${elective}"입니다. ${range}은 문제지의 ${elective} 부분에서 찾으세요.`
+}
+
+/**
+ * @brief 홀수형·짝수형 안내 (한 파일에 두 형이 함께 있을 때 평가지의 형만 풀도록)
+ * @returns {string} 나누지 않는 시험이면 빈 문자열
+ */
+export function formNote(paper) {
+  const form = formTypeOf(paper.meta)
+  return form ? `이 평가지는 ${form}입니다. 첨부한 문제지에 홀수형과 짝수형이 함께 있으면 ${form} 부분만 보고 푸세요.` : ''
 }

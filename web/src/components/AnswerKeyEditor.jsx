@@ -101,7 +101,7 @@ export default function AnswerKeyEditor({ paper, onChange }) {
           if (question.type !== 'choice') return question
           const tenths = baseTenths + (choiceIndex < extraCount ? 1 : 0)
           choiceIndex += 1
-          return { ...question, points: tenths / 10 }
+          return { ...question, points: tenths / 10, pointsEstimated: false }
         })
       }
     })
@@ -199,7 +199,7 @@ export default function AnswerKeyEditor({ paper, onChange }) {
                 step="0.1"
                 value={question.points}
                 aria-label={`${question.no}번 배점`}
-                onChange={e => setQuestion(question.no, { points: Number(e.target.value) || 0 })}
+                onChange={e => setQuestion(question.no, { points: Number(e.target.value) || 0, pointsEstimated: false })}
               />
               점
             </label>

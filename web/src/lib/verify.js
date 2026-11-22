@@ -10,10 +10,11 @@
 
 import { choiceList, gradeRun, normalizeChoiceSet } from './grading.js'
 import { ELECTIVES, electiveOf, standardPreset } from './presets.js'
-import { roundPoints } from './schema.js'
+import { formTypeOf, roundPoints, usesFormType } from './schema.js'
 
 export const LEVEL_LABEL = { error: '오류', warn: '확인 필요', ok: '통과', info: '안내' }
 const LEVEL_RANK = { error: 3, warn: 2, ok: 1, info: 0 }
+const CHECK_LETTERS = '가나다라마바사아자차카'
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩'
 const circled = no => CIRCLED[no - 1] ?? String(no)
@@ -29,6 +30,33 @@ export function targetTotal(paper) {
   return 100
 }
 
+/**
+ * @brief 짐작값 배점(표준 구성)을 문제지에 인쇄된 [N점] 표시로 맞춤
+ * - 인쇄된 배점이 있는 문항은 그 값, 표시 없는 문항은 "표시 없는 문항은 N점" 안내(없으면 2점)를 쓰되
+ *   그렇게 해서 총점이 맞을 때만 적용하고, 맞지 않으면 인쇄된 문항만 바꿈
+ * @returns {Object|null} 바뀐 평가지 (바꿀 것이 없으면 null)
+ */
+export function applyPrintedPoints(paper, facts) {
+  const printed = new Map(Object.entries(facts?.questions ?? {}).filter(([, fact]) => fact.printedPoints > 0).map(([no, fact]) => [Number(no), fact.printedPoints]))
+  if (!printed.size || !paper.questions.some(question => question.pointsEstimated)) return null
+  const unmarked = facts.defaultPoints || 2
+  const pick = (question, fillUnmarked) => {
+    if (!question.pointsEstimated) return question.points
+    if (printed.has(question.no)) return printed.get(question.no)
+    return fillUnmarked && facts.questions?.[question.no] ? unmarked : question.points
+  }
+  const total = list => roundPoints(list.reduce((sum, value) => sum + (Number(value) || 0), 0))
+  const filled = paper.questions.map(question => pick(question, true))
+  const values = total(filled) === targetTotal(paper) ? filled : paper.questions.map(question => pick(question, false))
+  if (values.every((value, index) => value === paper.questions[index].points)) return null
+  return {
+    ...paper,
+    questions: paper.questions.map((question, index) => (question.pointsEstimated && values[index] !== question.points
+      ? { ...question, points: values[index], pointsEstimated: false, pointsFromPaper: true }
+      : question))
+  }
+}
+
 /** @brief PDF에서 읽은 사실과 AI가 읽은 사실 합치기 (문항 정보는 AI 우선, 쪽 번호는 PDF 우선) */
 export function mergeFacts(pdf, ai) {
   const pdfUsable = pdf?.readable && Object.keys(pdf.questions ?? {}).length > 0
@@ -41,6 +69,9 @@ export function mergeFacts(pdf, ai) {
     questions: { ...pdf.questions, ...ai.questions },
     anchors: Object.keys(pdf.questions).length >= Object.keys(ai.questions).length * 0.8 ? pdf.anchors : ai.anchors,
     pages: pdfPagesFound ? pdf.pages : ai.pages,
+    formType: pdf.formType || ai.formType || '',
+    bothForms: Boolean(pdf.bothForms),
+    checkedPages: pdf.checkedPages ?? '',
     notes: ai.notes ?? [],
     defaultPoints: pdf.defaultPoints || ai.defaultPoints || 0
   }
@@ -51,7 +82,7 @@ function makeCheck(id, letter, title, description, items) {
   return { id, letter, title, description, items, status }
 }
 
-/* ───── 나. 배점 합계와 총점, 문제지 배점 표시 ───── */
+/* ───── 배점 합계와 총점, 문제지 배점 표시 ───── */
 function checkPoints(paper, facts) {
   const items = []
   const target = targetTotal(paper)
@@ -59,6 +90,8 @@ function checkPoints(paper, facts) {
     const points = Number(question.points)
     if (!Number.isFinite(points) || points <= 0) items.push({ level: 'error', no: question.no, text: `${question.no}번 배점이 비어 있거나 0점입니다.` })
   }
+  const fromPaper = paper.questions.filter(question => question.pointsFromPaper).length
+  if (fromPaper) items.push({ level: 'info', text: `표준 구성의 짐작 배점을 문제지의 [N점] 표시대로 맞췄습니다 (${fromPaper}문항).` })
   const sum = roundPoints(paper.questions.reduce((total, question) => total + (Number(question.points) || 0), 0))
   if (sum === target) items.push({ level: 'ok', text: `배점 합계 ${fmt(sum)}점이 총점 ${fmt(target)}점과 일치합니다.` })
   else items.push({ level: 'error', text: `배점 합계 ${fmt(sum)}점이 총점 ${fmt(target)}점과 ${fmt(Math.abs(target - sum))}점 ${sum > target ? '많습니다' : '모자랍니다'}.` })
@@ -71,7 +104,7 @@ function checkPoints(paper, facts) {
       const printed = fact.printedPoints || 0
       if (printed > 0) {
         compared += 1
-        if (printed !== Number(question.points)) items.push({ level: 'error', no: question.no, text: `${question.no}번: 문제지에는 [${fmt(printed)}점]인데 입력한 배점은 ${fmt(question.points)}점입니다.` })
+        if (printed !== Number(question.points)) items.push({ level: question.pointsEstimated ? 'warn' : 'error', no: question.no, text: `${question.no}번: 문제지에는 [${fmt(printed)}점]인데 ${question.pointsEstimated ? '표준 구성 짐작 배점은' : '입력한 배점은'} ${fmt(question.points)}점입니다.` })
       } else if (facts.defaultPoints > 0 && Number(question.points) !== facts.defaultPoints) {
         compared += 1
         items.push({ level: 'warn', no: question.no, text: `${question.no}번: 배점 표시가 없어 ${fmt(facts.defaultPoints)}점 문항으로 보이는데 입력한 배점은 ${fmt(question.points)}점입니다.` })
@@ -103,7 +136,7 @@ const gapText = (gap, where) => (gap.after === 0
   ? `${where} ${gap.next}번부터 시작합니다 (${listNos(gap.missing)}번 없음).`
   : `${where} ${gap.after}번 다음이 ${gap.next}번입니다 (${listNos(gap.missing)}번 없음).`)
 
-/* ───── 다. 문항 번호 누락·중복 ───── */
+/* ───── 문항 번호 누락·중복 ───── */
 function checkNumbering(paper, facts) {
   const items = []
   const own = numberingIssues(paper.questions.map(question => question.no))
@@ -167,7 +200,7 @@ export function composition(questions) {
   return { choiceCount: choice.length, writtenCount: written.length, choicePoints: sum(choice), writtenPoints: sum(written), totalPoints: sum(questions) }
 }
 
-/* ───── 라. 선택형·서답형 문항 수와 배점 비율 ───── */
+/* ───── 선택형·서답형 문항 수와 배점 비율 ───── */
 function checkComposition(paper) {
   const items = []
   const actual = composition(paper.questions)
@@ -199,9 +232,13 @@ function checkComposition(paper) {
   return makeCheck('composition', '라', '선택형·서답형 구성', '선택형(객관식)과 서답형(단답·서술) 문항 수와 배점 비율이 출제 계획과 맞는지 대조합니다.', items)
 }
 
-const normalizeOption = text => String(text ?? '').normalize('NFKC').replace(/\s+/g, '').replace(/[.,]$/, '')
+// 수식 글꼴 등으로 읽히지 않는 글자(사용자 정의·제어 문자)는 지우고, 글자나 숫자가 하나도 없으면 비교하지 않음
+const normalizeOption = text => {
+  const cleaned = String(text ?? '').normalize('NFKC').replace(/[\p{Co}\p{Cc}\p{Cf}\s]+/gu, '').replace(/[.,]$/, '')
+  return /[\p{L}\p{N}]/u.test(cleaned) ? cleaned : ''
+}
 
-/* ───── 마. 객관식 선지 번호와 중복 내용 ───── */
+/* ───── 객관식 선지 번호와 중복 내용 ───── */
 function checkOptions(paper, facts) {
   const items = []
   const choices = paper.questions.filter(question => question.type === 'choice')
@@ -244,7 +281,7 @@ function checkOptions(paper, facts) {
   return makeCheck('options', '마', '객관식 선지', '객관식마다 선지 번호(①~⑤)가 빠짐없이 있는지, 선지 내용이 겹치지 않는지 봅니다.', items)
 }
 
-/* ───── 바. 정답 표기 오류 ───── */
+/* ───── 정답 표기 오류 ───── */
 function checkAnswers(paper, facts) {
   const items = []
   const standard = standardPreset(paper.meta ?? {})
@@ -331,7 +368,29 @@ export function analyzePageNumbers(pages) {
   return results
 }
 
-/* ───── 사. 문제지 쪽 번호 ───── */
+/* ───── 홀수형·짝수형 (수능·모의평가·모의고사) ───── */
+function checkFormType(paper, facts) {
+  const items = []
+  const form = formTypeOf(paper.meta)
+  if (!paper.meta?.formType) items.push({ level: 'info', text: `문제지 형을 고르지 않아 ${form}으로 봅니다. 표지 옵션에서 확인하세요.` })
+  if (facts?.formType) {
+    if (facts.formType === form) items.push({ level: 'ok', text: `문제지에 인쇄된 형(${facts.formType})과 설정한 형이 같습니다.` })
+    else items.push({ level: 'error', text: `문제지는 ${facts.formType}인데 평가지는 ${form}으로 설정돼 있습니다. 표지 옵션에서 형을 바꾸거나 맞는 문제지를 올리세요.` })
+    if (facts.bothForms) items.push({ level: 'info', text: `문제지 파일에 홀수형과 짝수형이 함께 있어 ${form} 쪽(${facts.checkedPages})만 검사했습니다. AI 풀이도 ${form} 쪽을 풉니다.` })
+  } else if (facts) {
+    items.push({ level: 'info', text: '문제지에서 홀수형·짝수형 표시를 읽지 못했습니다.' })
+  }
+  const keyForm = paper.answerKeySource?.formType
+  if (keyForm) {
+    if (keyForm === form) items.push({ level: 'ok', text: `정답표도 ${keyForm} 기준입니다.` })
+    else items.push({ level: 'error', text: `정답표는 ${keyForm} 기준인데 평가지는 ${form}입니다. 같은 형의 정답표를 다시 반영하세요.` })
+  } else if (paper.answerKeySource?.type === 'upload') {
+    items.push({ level: 'info', text: `올린 정답표에서 형을 알 수 없었습니다. ${form} 정답표인지 확인하세요.` })
+  }
+  return makeCheck('form', '', '홀수형·짝수형', `수능형 문제지는 형마다 선지 배열이 달라 정답이 다릅니다. 문제지·정답표·설정한 형(${form})이 같은지 봅니다.`, items)
+}
+
+/* ───── 문제지 쪽 번호 ───── */
 function checkPages(paper, facts) {
   const items = []
   if (!facts?.pages?.length) {
@@ -365,7 +424,7 @@ function checkPages(paper, facts) {
   return makeCheck('pages', '사', '문제지 쪽 번호', '문제지 쪽 번호가 순서대로 매겨졌는지, 빠지거나 겹친 쪽이 없는지 봅니다.', items)
 }
 
-/* ───── 아. AI 풀이와 정답 대조 (정답 오류 의심 문항) ───── */
+/* ───── AI 풀이와 정답 대조 (정답 오류 의심 문항) ───── */
 function checkAgainstRuns(paper, runs) {
   const items = []
   const usable = (runs ?? []).filter(run => !run.isDemo)
@@ -401,10 +460,13 @@ export function validatePaper(paper, { facts = null, runs = [] } = {}) {
     checkComposition(paper),
     checkOptions(paper, facts),
     checkAnswers(paper, facts),
+    ...(usesFormType(paper.meta) ? [checkFormType(paper, facts)] : []),
     checkPages(paper, facts),
     checkAgainstRuns(paper, runs),
-    ...(facts?.notes?.length ? [makeCheck('notes', '+', 'AI 검토 의견', 'AI가 문제지를 읽으며 눈에 띈 인쇄 오류·오탈자 등입니다. 직접 확인하세요.', facts.notes.map(text => ({ level: 'warn', text })))] : [])
+    ...(facts?.notes?.length ? [makeCheck('notes', '', 'AI 검토 의견', 'AI가 문제지를 읽으며 눈에 띈 인쇄 오류·오탈자 등입니다. 직접 확인하세요.', facts.notes.map(text => ({ level: 'warn', text })))] : [])
   ]
+  // 항목 기호는 화면에 나오는 순서대로 가, 나, 다 …
+  checks.forEach((check, index) => { check.letter = CHECK_LETTERS[index] ?? String(index + 1) })
   const counts = { error: 0, warn: 0, ok: 0, info: 0 }
   for (const check of checks) for (const item of check.items) counts[item.level] += 1
   const status = counts.error ? 'error' : counts.warn ? 'warn' : 'ok'

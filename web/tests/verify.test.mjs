@@ -120,3 +120,54 @@ test('2쪽짜리 문제지에서 쪽 번호 1, 3 → 둘째 쪽 오류', () => {
   assert.equal(file.readable, true)
   assert.deepEqual(file.pages.map(page => [page.printed, page.expected]), [[1, 1], [3, 2]])
 })
+
+test('검증 항목 기호는 가부터 차례로', () => {
+  const paper = basePaper()
+  assert.deepEqual(validatePaper(paper).checks.map(check => check.letter), ['가', '나', '다', '라', '마', '바', '사'])
+  // 수능형은 홀수형·짝수형 항목이 정답 표기 다음에 들어감
+  paper.meta = { ...paper.meta, schoolLevel: '고등', examType: '수능', subject: '수학', formType: '짝수형' }
+  const result = validatePaper(paper)
+  assert.equal(result.checks.find(check => check.id === 'form').letter, '바')
+  assert.equal(result.checks.find(check => check.id === 'pages').letter, '사')
+})
+
+test('홀수형·짝수형: 정답표 열 선택과 문제지·정답표 대조', () => {
+  const paper = basePaper()
+  paper.meta = { ...paper.meta, schoolLevel: '고등', examType: '수능', subject: '물리학', formType: '짝수형' }
+  const table = '번호,홀수형,짝수형,배점\n1,1,3,20\n2,2,4,20\n3,3,5,20\n4,4,1,20\n5,12,12,20'
+  const parsed = parseAnswerKey(table, paper)
+  assert.equal(parsed.formType, '짝수형')
+  assert.deepEqual(parsed.entries.map(entry => entry.answer), ['3', '4', '5', '1', '12'])
+  const odd = parseAnswerKey(table, { ...paper, meta: { ...paper.meta, formType: '홀수형' } })
+  assert.deepEqual(odd.entries.map(entry => entry.answer), ['1', '2', '3', '4', '12'])
+  assert.equal(parseAnswerKey(JSON.stringify({ 홀수형: { 1: 1 }, 짝수형: { 1: 5 } }), paper).entries[0].answer, '5')
+  assert.equal(parseAnswerKey('1 ③\n2 ①\n3 ②\n4 ④', paper, { fileName: '물리학_홀수형_정답.txt' }).formType, '홀수형')
+
+  const keyed = applyAnswerKeyText(paper, table, { fileName: 'key.csv', restructure: 'never' }).paper
+  assert.equal(keyed.answerKeySource.formType, '짝수형')
+  const text = (result) => result.checks.find(check => check.id === 'form').items.map(item => item.text).join('\n')
+  assert.match(text(validatePaper(keyed, { facts: { source: 'pdf', readable: true, anchors: [], questions: {}, pages: [], formType: '홀수형' } })), /문제지는 홀수형인데 평가지는 짝수형/)
+  keyed.meta.formType = '홀수형'
+  assert.match(text(validatePaper(keyed)), /정답표는 짝수형 기준인데 평가지는 홀수형/)
+})
+
+test('표준 구성 짐작 배점을 문제지 [N점] 표시로 맞춤', async () => {
+  const { applyPrintedPoints } = await import('../src/lib/verify.js')
+  const { standardPreset } = await import('../src/lib/presets.js')
+  const paper = createPaper({ questions: standardPreset({ schoolLevel: '고등', examType: '수능', subject: '국어' }).questions })
+  paper.meta = { ...paper.meta, schoolLevel: '고등', examType: '수능', subject: '국어' }
+  const threes = [3, 8, 12, 17, 21, 23, 30, 34, 40, 45]
+  const facts = { source: 'pdf', readable: true, defaultPoints: 0, anchors: [], pages: [], questions: Object.fromEntries(paper.questions.map(question => [question.no, { printedPoints: threes.includes(question.no) ? 3 : 0, marks: [] }])) }
+  const fixed = applyPrintedPoints(paper, facts)
+  assert.deepEqual(fixed.questions.filter(question => question.points === 3).map(question => question.no), threes)
+  const result = validatePaper(fixed, { facts })
+  assert.equal(result.checks.find(check => check.id === 'points').status, 'ok')
+  assert.equal(applyPrintedPoints(fixed, facts), null, '다시 맞출 것 없음')
+})
+
+test('수식 글꼴처럼 읽히지 않는 선지는 내용 중복으로 보지 않음', () => {
+  const paper = basePaper()
+  const fact = analyzeQuestionText('1. 값은? ① \uE001 ② \uE001 ③   ④ 4 ⑤ 5')
+  const result = validatePaper(paper, { facts: { source: 'pdf', readable: true, anchors: [], pages: [], questions: { 1: { ...fact, index: 1 } } } })
+  assert.ok(!/1번: 선지/.test(result.checks.find(check => check.id === 'options').items.map(item => item.text).join('\n')))
+})

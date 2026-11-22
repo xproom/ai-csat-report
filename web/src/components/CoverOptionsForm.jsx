@@ -4,7 +4,7 @@
  */
 
 import { ELECTIVES, STANDARD_EXAM_TYPES, standardPreset } from '@/lib/presets'
-import { COVER_THEMES, EXAM_TYPES, GRADES, SCHOOL_LEVELS, SCHOOL_NAMES, SUBJECTS } from '@/lib/schema'
+import { COVER_THEMES, EXAM_TYPES, FORM_TYPES, GRADES, SCHOOL_LEVELS, SCHOOL_NAMES, SUBJECTS, formTypeOf, usesFormType } from '@/lib/schema'
 
 function Segmented({ value, options, onChange, label }) {
   return (
@@ -89,6 +89,12 @@ export default function CoverOptionsForm({ paper, onChange }) {
         </div>
       </div>
 
+      {usesFormType(meta) && (
+        <div>
+          <span className="field-label">문제지 형 (홀수형·짝수형은 선지 배열이 달라 정답이 다릅니다. 정답표도 같은 형으로 반영됩니다)</span>
+          <Segmented label="문제지 형" value={formTypeOf(meta)} options={FORM_TYPES} onChange={formType => setMeta({ formType })} />
+        </div>
+      )}
       {electives.length > 0 && (
         <div>
           <span className="field-label">선택과목 (문제지에 여러 과목이 있으면 AI가 이 과목 부분을 풉니다)</span>

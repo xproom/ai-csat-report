@@ -44,7 +44,7 @@ export default function AnswerKeyUpload({ paper, onApply, onPendingChange }) {
   const [applyPoints, setApplyPoints] = useState(true)
   const [showAll, setShowAll] = useState(false)
 
-  const parsed = useMemo(() => (text.trim() ? parseAnswerKey(text, paper) : null), [text, paper])
+  const parsed = useMemo(() => (text.trim() ? parseAnswerKey(text, paper, { fileName }) : null), [text, paper, fileName])
   const proposal = useMemo(() => proposeStructure(paper, parsed), [paper, parsed])
   const keyTargets = paper.questions.filter(question => question.type !== 'essay').length
   const keysEntered = keyTargets - missingAnswers(paper).length
@@ -76,6 +76,7 @@ export default function AnswerKeyUpload({ paper, onApply, onPendingChange }) {
   }
 
   const apply = () => {
+    // parsed를 함께 넘겨 정답표의 번호·형(홀수형·짝수형)을 기록 (검증에서 대조)
     onApply(applyAnswerKey(paper, parsed.entries, { fileName: fileName || '직접 붙여넣기', applyPoints, parsed }))
     setText('')
     setFileName('')
@@ -138,7 +139,7 @@ export default function AnswerKeyUpload({ paper, onApply, onPendingChange }) {
         <div className="space-y-3 rounded-2xl bg-[var(--color-paper)] p-3 sm:p-4">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-bold">{parsed.entries.length}문항 인식</span>
-            <span className="text-xs text-[var(--color-ink-soft)]">({parsed.format})</span>
+            <span className="text-xs text-[var(--color-ink-soft)]">({parsed.format}{parsed.formType ? ` · ${parsed.formType} 정답표` : ""})</span>
             {['changed', 'new', 'same', 'missing'].map(key => counts[key] ? (
               <span key={key} className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS[key].className}`}>{STATUS[key].label} {counts[key]}</span>
             ) : null)}
