@@ -1,4 +1,4 @@
--- AI 내신 성적표 · Supabase 스키마
+-- AI 검증 평가 서비스 · Supabase 스키마
 -- Supabase 대시보드 → SQL Editor에 붙여 넣고 한 번 실행하세요. (여러 번 실행해도 안전)
 --
 -- 구성

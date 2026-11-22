@@ -23,15 +23,15 @@ export function Icon({ d, className = 'w-5 h-5' }) {
 /** @brief OMR 마킹을 닮은 로고 */
 function Logo() {
   return (
-    <a href="#/" className="flex items-center gap-2.5 shrink-0" aria-label="AI 내신 성적표 홈">
-      <span className="grid grid-cols-3 gap-[3px] p-1.5 rounded-lg bg-white border border-[var(--color-omr)]/40">
+    <a href="#/" className="flex items-center gap-3 shrink-0" aria-label="AI 검증 평가 서비스 홈">
+      <span className="grid grid-cols-3 gap-[3.6px] p-[7px] rounded-[10px] bg-white border border-[var(--color-omr)]/40">
         {[0, 1, 0, 1, 0, 0, 0, 0, 1].map((filled, index) => (
-          <span key={index} className={`w-[6px] h-[8px] rounded-full ${filled ? 'bg-[var(--color-ink)]' : 'border border-[var(--color-omr)]/70'}`} />
+          <span key={index} className={`w-[7.2px] h-[9.6px] rounded-full ${filled ? 'bg-[var(--color-ink)]' : 'border border-[var(--color-omr)]/70'}`} />
         ))}
       </span>
       <span className="leading-tight">
-        <span className="block font-extrabold tracking-tight text-[1.05rem]">AI 내신 성적표</span>
-        <span className="block text-[0.7rem] text-[var(--color-ink-soft)] -mt-0.5">문제지·정답 AI 검증과 OMR 채점</span>
+        <span className="block font-extrabold tracking-tight text-[1.26rem]">AI 검증 평가 서비스</span>
+        <span className="block text-[0.84rem] text-[var(--color-ink-soft)] -mt-0.5">문제지·정답 AI 검증과 OMR 채점</span>
       </span>
     </a>
   )

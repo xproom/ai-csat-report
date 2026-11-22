@@ -1,7 +1,7 @@
 {
-  "name": "AI 내신 성적표",
-  "short_name": "AI 내신",
-  "description": "초·중학교 중간·기말고사로 AI 모델의 실력을 평가하는 서비스",
+  "name": "AI 검증 평가 서비스",
+  "short_name": "AI 검증평가",
+  "description": "교사가 낸 문제지와 정답을 AI가 검증하고 OMR로 채점하는 서비스",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
