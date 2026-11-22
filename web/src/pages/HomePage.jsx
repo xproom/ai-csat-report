@@ -8,7 +8,7 @@ import PaperCover from '@/components/PaperCover'
 import { Icon } from '@/components/Layout'
 import { loadDemo } from '@/lib/demo'
 import { formatRate, gradeRun } from '@/lib/grading'
-import { EXAM_TYPES, paperTitle } from '@/lib/schema'
+import { EXAM_TYPES, SCHOOL_LEVELS, paperTitle } from '@/lib/schema'
 import { useStore } from '@/lib/store'
 
 const STEPS = [
@@ -48,7 +48,7 @@ export default function HomePage() {
           ))}
         </div>
         <div className="relative max-w-2xl">
-          <span className="inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold tracking-wide">초등 · 중등 정기고사 기반 AI 평가</span>
+          <span className="inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold tracking-wide">초등 · 중등 · 고등 시험 기반 AI 평가</span>
           <h1 className="mt-4 text-3xl sm:text-5xl font-extrabold leading-[1.15] tracking-tight break-keep">
             AI도 우리 학교<br className="hidden sm:block" /> 시험을 볼 수 있을까?
           </h1>
@@ -88,7 +88,7 @@ export default function HomePage() {
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               <input className="input !w-full sm:!w-48" value={query} placeholder="검색 (과목, 학교)" onChange={e => setQuery(e.target.value)} aria-label="평가지 검색" />
               <select className="input !w-auto" value={level} onChange={e => setLevel(e.target.value)} aria-label="학교급">
-                {['전체', '초등', '중등'].map(item => <option key={item}>{item}</option>)}
+                {['전체', ...SCHOOL_LEVELS].map(item => <option key={item}>{item}</option>)}
               </select>
               <select className="input !w-auto" value={examType} onChange={e => setExamType(e.target.value)} aria-label="시험 종류">
                 {['전체', ...EXAM_TYPES].map(item => <option key={item}>{item}</option>)}

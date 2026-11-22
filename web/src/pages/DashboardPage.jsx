@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { formatRate, gradeRun, modelLeaderboard } from '@/lib/grading'
-import { EXAM_TYPES, GRADES, QUESTION_TYPES, SCHOOL_LEVELS, SUBJECTS, paperTitle } from '@/lib/schema'
+import { EXAM_TYPES, GRADES, QUESTION_TYPES, SCHOOL_LEVELS, SCHOOL_SHORT, SUBJECTS, paperTitle } from '@/lib/schema'
 import { useStore } from '@/lib/store'
 
 const PALETTE = ['#1f3a5f', '#c8a24a', '#2f7d5b', '#d62839', '#6b4fa0', '#2b8aa8', '#b35c2e', '#5b6478']
@@ -85,8 +85,8 @@ export default function DashboardPage() {
   const gradeRows = useMemo(() => {
     const map = new Map()
     for (const { paper, runs: paperRuns } of entries) {
-      const key = `${paper.meta.schoolLevel === '초등' ? '초' : '중'}${paper.meta.grade}`
-      const order = (paper.meta.schoolLevel === '초등' ? 0 : 10) + paper.meta.grade
+      const key = `${SCHOOL_SHORT[paper.meta.schoolLevel] ?? '중'}${paper.meta.grade}`
+      const order = SCHOOL_LEVELS.indexOf(paper.meta.schoolLevel) * 10 + paper.meta.grade
       if (!map.has(key)) map.set(key, { key, order, rates: [] })
       for (const run of paperRuns) map.get(key).rates.push(gradeRun(paper, run).rate)
     }
@@ -98,8 +98,8 @@ export default function DashboardPage() {
     .sort((a, b) => b.run.createdAt.localeCompare(a.run.createdAt))
     .slice(0, 6), [entries])
 
-  const gradeOptions = level === '전체' ? ['전체', ...new Set([...GRADES.초등, ...GRADES.중등].map(value => `${value}학년`))] : ['전체', ...GRADES[level].map(value => `${value}학년`)]
-  const subjectOptions = ['전체', ...(level === '전체' ? [...new Set([...SUBJECTS.초등, ...SUBJECTS.중등])] : SUBJECTS[level])]
+  const gradeOptions = level === '전체' ? ['전체', ...new Set(Object.values(GRADES).flat().sort((a, b) => a - b).map(value => `${value}학년`))] : ['전체', ...GRADES[level].map(value => `${value}학년`)]
+  const subjectOptions = ['전체', ...(level === '전체' ? [...new Set(Object.values(SUBJECTS).flat())] : SUBJECTS[level])]
   const chartData = board.map((row, index) => ({ model: row.model, pct: Math.round(row.avgRate * 1000) / 10, color: PALETTE[index % PALETTE.length] }))
 
   return (

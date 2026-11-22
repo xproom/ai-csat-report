@@ -17,16 +17,23 @@
  * }
  */
 
-export const SCHOOL_LEVELS = ['초등', '중등']
+export const SCHOOL_LEVELS = ['초등', '중등', '고등']
 
-export const GRADES = { 초등: [3, 4, 5, 6], 중등: [1, 2, 3] }
+export const GRADES = { 초등: [3, 4, 5, 6], 중등: [1, 2, 3], 고등: [1, 2, 3] }
 
-export const EXAM_TYPES = ['중간고사', '기말고사', '단원평가', '모의평가']
+export const EXAM_TYPES = ['중간고사', '기말고사', '단원평가', '모의평가', '모의고사', '수능']
 
 export const SUBJECTS = {
   초등: ['국어', '수학', '사회', '과학', '영어', '도덕'],
-  중등: ['국어', '수학', '영어', '사회', '역사', '과학', '도덕', '기술·가정', '정보', '한문']
+  중등: ['국어', '수학', '영어', '사회', '역사', '과학', '도덕', '기술·가정', '정보', '한문'],
+  고등: ['국어', '수학', '영어', '한국사', '통합사회', '통합과학', '물리학', '화학', '생명과학', '지구과학', '사회·문화', '생활과 윤리', '윤리와 사상', '한국지리', '세계지리', '동아시아사', '세계사', '경제', '정치와 법', '정보', '제2외국어']
 }
+
+/** 학교급 → 표지·제목에 쓰는 이름 */
+export const SCHOOL_NAMES = { 초등: '초등학교', 중등: '중학교', 고등: '고등학교' }
+
+/** 학교급 → 대시보드 학년 표기 앞글자 (예: 고3) */
+export const SCHOOL_SHORT = { 초등: '초', 중등: '중', 고등: '고' }
 
 export const QUESTION_TYPES = {
   choice: '객관식',
@@ -97,7 +104,7 @@ export function createPaper(overrides = {}) {
 export function paperTitle(paper) {
   const { meta } = paper
   if (meta.title?.trim()) return meta.title.trim()
-  const level = meta.schoolLevel === '초등' ? '초등학교' : '중학교'
+  const level = SCHOOL_NAMES[meta.schoolLevel] ?? '중학교'
   return `${level} ${meta.grade}학년 ${meta.semester}학기 ${meta.examType} ${meta.subject}`
 }
 

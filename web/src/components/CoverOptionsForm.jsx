@@ -3,7 +3,7 @@
  * @brief 평가지별 표지 옵션 입력 (학교급·학년·학기·시험 종류·과목·표지 테마·유의사항)
  */
 
-import { COVER_THEMES, EXAM_TYPES, GRADES, SCHOOL_LEVELS, SUBJECTS } from '@/lib/schema'
+import { COVER_THEMES, EXAM_TYPES, GRADES, SCHOOL_LEVELS, SCHOOL_NAMES, SUBJECTS } from '@/lib/schema'
 
 function Segmented({ value, options, onChange, label }) {
   return (
@@ -43,7 +43,7 @@ export default function CoverOptionsForm({ paper, onChange }) {
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <span className="field-label">학교급</span>
-          <Segmented label="학교급" value={meta.schoolLevel} options={SCHOOL_LEVELS.map(level => [level, `${level}학교`])} onChange={changeLevel} />
+          <Segmented label="학교급" value={meta.schoolLevel} options={SCHOOL_LEVELS.map(level => [level, SCHOOL_NAMES[level]])} onChange={changeLevel} />
         </div>
         <div>
           <span className="field-label">학년</span>
@@ -89,7 +89,7 @@ export default function CoverOptionsForm({ paper, onChange }) {
         </label>
         <label className="block">
           <span className="field-label">학교 이름 (선택)</span>
-          <input className="input" value={meta.schoolName} placeholder="예: 한빛중학교" onChange={e => setMeta({ schoolName: e.target.value })} />
+          <input className="input" value={meta.schoolName} placeholder="예: 한빛고등학교" onChange={e => setMeta({ schoolName: e.target.value })} />
         </label>
       </div>
 

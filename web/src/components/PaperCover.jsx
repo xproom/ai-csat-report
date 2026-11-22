@@ -4,13 +4,13 @@
  * @note 글자 크기는 컨테이너 너비(cqw) 기준이라 어떤 크기에서도 비율이 유지됩니다.
  */
 
-import { COVER_THEMES, countByType, totalPoints } from '@/lib/schema'
+import { COVER_THEMES, SCHOOL_NAMES, countByType, totalPoints } from '@/lib/schema'
 
 export default function PaperCover({ paper, compact = false }) {
   const { meta, cover } = paper
   const theme = COVER_THEMES[cover.theme] ?? COVER_THEMES.navy
   const counts = countByType(paper)
-  const level = meta.schoolLevel === '초등' ? '초등학교' : '중학교'
+  const level = SCHOOL_NAMES[meta.schoolLevel] ?? '중학교'
   const notices = (cover.notices || []).filter(Boolean)
 
   return (

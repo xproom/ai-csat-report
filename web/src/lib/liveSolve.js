@@ -304,6 +304,50 @@ async function solveOne({ client, modelInfo, effort, blocks, paper, question, si
   }
 }
 
+const SINGLE_ANSWER_SCHEMA = {
+  type: 'object',
+  properties: { answer: { type: 'string' } },
+  required: ['answer'],
+  additionalProperties: false
+}
+
+/**
+ * @brief 마지막 안전장치: 결과 탭의 "한 번에 풀기"와 같은 구조화 응답으로 한 문항의 답만 받음
+ * (스트리밍 풀이가 거절돼도 이 방식은 응답한 기록이 있어 마지막 단계로 사용)
+ */
+async function solveStructured({ client, modelInfo, effort, blocks, paper, question, signal, emit }) {
+  const response = await client.messages.create({
+    model: modelInfo.id,
+    max_tokens: 8000,
+    system: ANSWER_ONLY_PROMPT,
+    output_config: { effort, format: { type: 'json_schema', schema: SINGLE_ANSWER_SCHEMA } },
+    messages: [{ role: 'user', content: [...blocks, { type: 'text', text: questionPrompt(paper, question) }] }]
+  }, { signal })
+  const refused = response.stop_reason === 'refusal'
+  const text = response.content.filter(block => block.type === 'text').map(block => block.text).join('')
+  let raw = ''
+  try { raw = JSON.parse(text).answer ?? '' } catch { raw = extractAnswerFallback(question, text) }
+  const answer = cleanFinalAnswer(question, raw)
+  if (answer) emit('answer', answer)
+  return {
+    answer,
+    status: answer ? 'answered' : text ? 'parse_failed' : 'no_answer',
+    refused: refused && !answer,
+    refusalCategory: response.stop_details?.category ?? null,
+    page: null,
+    inputTokens: (response.usage?.input_tokens ?? 0) + (response.usage?.cache_creation_input_tokens ?? 0),
+    cacheReadTokens: response.usage?.cache_read_input_tokens ?? 0,
+    outputTokens: response.usage?.output_tokens ?? 0
+  }
+}
+
+/** 거절되면 한 단계씩 낮춰 다시 요청: 자세한 풀이 → 답만(스트리밍) → 구조화 응답 */
+const SOLVE_LADDER = ['detailed', 'answerOnly', 'structured']
+const LADDER_NOTE = {
+  answerOnly: '답만 다시 요청합니다.',
+  structured: '한 번에 풀기와 같은 방식으로 답을 다시 요청합니다.'
+}
+
 /**
  * @brief 평가지 전체를 문항별로 실시간 풀이
  * @param {Object} options
@@ -346,9 +390,9 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
   const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
   // 계정에서 받지 않는 선택 기능은 400 오류가 나면 끄고 다시 시도
   const compat = { fallbacks: modelInfo.fallback }
-  // 자세한 풀이가 연달아 거절되면 남은 문항은 답만 받음
-  let solveMode = 'detailed'
-  let consecutiveRefusals = 0
+  // 같은 단계에서 두 문항 연속 거절되면 남은 문항은 다음 단계부터 시작
+  let baseLevel = 0
+  let refusalsAtBase = 0
   const refusals = {}
   let aborted = false
   let fatalError = ''
@@ -366,22 +410,34 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
     if (pageMap[question.no]) emit('page', `${pageMap[question.no].file + 1}-${pageMap[question.no].page}`)
     for (;;) {
       try {
-        let result = await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat, mode: solveMode })
-        if (result.refused && solveMode === 'detailed') {
-          emit('step', `자세한 풀이 요청이 거절되어(분류: ${result.refusalCategory ?? '알 수 없음'}) 답만 다시 요청합니다.`)
-          consecutiveRefusals += 1
-          if (consecutiveRefusals >= 2) {
-            solveMode = 'answerOnly'
-            emit('step', '거절이 이어져 남은 문항은 답만 받습니다.')
+        let level = baseLevel
+        let result = null
+        const spent = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+        for (;;) {
+          const mode = SOLVE_LADDER[level]
+          result = mode === 'structured'
+            ? await solveStructured({ client, modelInfo, effort, blocks, paper, question, signal, emit })
+            : await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat, mode })
+          spent.inputTokens += result.inputTokens
+          spent.outputTokens += result.outputTokens
+          spent.cacheReadTokens += result.cacheReadTokens
+          if (level === baseLevel) {
+            if (result.refused) {
+              refusalsAtBase += 1
+              if (refusalsAtBase >= 2 && baseLevel < SOLVE_LADDER.length - 1) {
+                baseLevel += 1
+                refusalsAtBase = 0
+                emit('step', '거절이 이어져 남은 문항은 더 간단한 방식으로 답을 받습니다.')
+              }
+            } else {
+              refusalsAtBase = 0
+            }
           }
-          const retry = await solveOne({ client, modelInfo, effort, blocks, paper, question, signal, emit, compat, mode: 'answerOnly' })
-          retry.inputTokens += result.inputTokens
-          retry.outputTokens += result.outputTokens
-          retry.cacheReadTokens += result.cacheReadTokens
-          result = retry
-        } else if (!result.refused) {
-          consecutiveRefusals = 0
+          if (!result.refused || level === SOLVE_LADDER.length - 1) break
+          level += 1
+          emit('step', `요청이 거절되어(분류: ${result.refusalCategory ?? '알 수 없음'}) ${LADDER_NOTE[SOLVE_LADDER[level]]}`)
         }
+        Object.assign(result, spent)
         if (result.refused) {
           refusals[question.no] = result.refusalCategory ?? 'unknown'
           errors[question.no] = `모델이 이 문항에 답하기를 거절했습니다(분류: ${result.refusalCategory ?? '알 수 없음'}).`
@@ -437,7 +493,7 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
     pageMap,
     locateMs,
     refusals,
-    solveMode,
+    solveMode: SOLVE_LADDER[baseLevel],
     trace,
     errors,
     fatalError,
