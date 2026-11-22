@@ -9,7 +9,7 @@
  * - 번호 없이 순서대로: "3 5 1 2 4" 또는 객관식만 "35124" (문항 순서대로 대입)
  */
 
-import { normalizeChoice } from './grading.js'
+import { normalizeChoiceSet } from './grading.js'
 import { questionsFromAnswerKey } from './presets.js'
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩'
@@ -26,7 +26,7 @@ function cleanAnswer(value) {
 function normalizeFor(question, value) {
   const text = cleanAnswer(value)
   if (!question) return text
-  return question.type === 'choice' ? normalizeChoice(text) : text
+  return question.type === 'choice' ? normalizeChoiceSet(text) : text
 }
 
 function fromJson(data) {
@@ -108,10 +108,12 @@ export function parseAnswerKey(text, paper) {
     }
   }
 
-  // 정답표의 모든 항목 (번호 중복이면 마지막 값)
+  // 정답표의 모든 항목 (번호 중복이면 마지막 값, 중복 번호는 따로 기록해 검증에 씀)
   const allByNo = new Map()
+  const duplicateNos = new Set()
   for (const entry of entries) {
     if (!Number.isInteger(entry.no) || entry.no < 1 || entry.no > 200) continue
+    if (allByNo.has(entry.no)) duplicateNos.add(entry.no)
     allByNo.set(entry.no, {
       no: entry.no,
       answer: cleanAnswer(entry.answer),
@@ -136,7 +138,7 @@ export function parseAnswerKey(text, paper) {
       points: Number.isFinite(entry.points) && entry.points > 0 ? entry.points : undefined
     })
   }
-  return { entries: [...merged.values()].sort((a, b) => a.no - b.no), allEntries, format, unknownNos: [...new Set(unknownNos)] }
+  return { entries: [...merged.values()].sort((a, b) => a.no - b.no), allEntries, format, unknownNos: [...new Set(unknownNos)], duplicateNos: [...duplicateNos].sort((a, b) => a - b) }
 }
 
 /**
@@ -151,7 +153,7 @@ export function diffAnswerKey(paper, entries) {
     let status = 'missing'
     if (uploaded) {
       if (!current) status = 'new'
-      else if (question.type === 'choice' ? normalizeChoice(current) === uploaded.answer : current === uploaded.answer) status = 'same'
+      else if (question.type === 'choice' ? normalizeChoiceSet(current) === uploaded.answer : current === uploaded.answer) status = 'same'
       else status = 'changed'
     }
     return { no: question.no, type: question.type, current, uploaded: uploaded?.answer ?? '', points: uploaded?.points, status }
@@ -159,7 +161,7 @@ export function diffAnswerKey(paper, entries) {
 }
 
 /** @brief 업로드 정답을 평가지에 반영 */
-export function applyAnswerKey(paper, entries, { fileName = '', applyPoints = true } = {}) {
+export function applyAnswerKey(paper, entries, { fileName = '', applyPoints = true, parsed = null } = {}) {
   const byNo = new Map(entries.map(entry => [entry.no, entry]))
   return {
     ...paper,
@@ -168,8 +170,14 @@ export function applyAnswerKey(paper, entries, { fileName = '', applyPoints = tr
       if (!entry) return question
       return { ...question, answer: entry.answer, ...(applyPoints && entry.points ? { points: entry.points } : {}) }
     }),
-    answerKeySource: { type: 'upload', fileName, appliedAt: new Date().toISOString(), count: entries.length }
+    answerKeySource: { type: 'upload', fileName, appliedAt: new Date().toISOString(), count: entries.length, ...keyNumbering(parsed) }
   }
+}
+
+/** @brief 정답표에 적힌 번호 목록과 중복 번호 (문항 번호 검증용) */
+function keyNumbering(parsed) {
+  if (!parsed) return {}
+  return { nos: parsed.allEntries.map(entry => entry.no), duplicateNos: parsed.duplicateNos ?? [] }
 }
 
 /**
@@ -201,11 +209,11 @@ export function applyAnswerKeyText(paper, text, { fileName = '', restructure = '
       paper: {
         ...paper,
         questions: proposal.questions,
-        answerKeySource: { type: 'upload', fileName, appliedAt: new Date().toISOString(), count: proposal.questions.length, restructured: true }
+        answerKeySource: { type: 'upload', fileName, appliedAt: new Date().toISOString(), count: proposal.questions.length, restructured: true, ...keyNumbering(parsed) }
       },
       restructured: true,
       count: proposal.questions.filter(question => question.answer).length
     }
   }
-  return { paper: applyAnswerKey(paper, parsed.entries, { fileName, applyPoints }), restructured: false, count: parsed.entries.length }
+  return { paper: applyAnswerKey(paper, parsed.entries, { fileName, applyPoints, parsed }), restructured: false, count: parsed.entries.length }
 }

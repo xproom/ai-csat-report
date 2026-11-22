@@ -1,6 +1,6 @@
 /**
  * @file PaperPage.jsx
- * @brief 평가지 상세 - 표지 / 문제지 / 정답·배점 / OMR / 결과 탭
+ * @brief 평가지 상세 - 표지 / 문제지 / 정답·배점 / 검증 / AI 풀이 / OMR 채점 / 채점 결과 탭
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -12,22 +12,23 @@ import { FileUploader, PaperViewer } from '@/components/FileUploader'
 import OmrCard, { OmrLegend } from '@/components/OmrCard'
 import SolveViewer from '@/components/SolveViewer'
 import PaperCover from '@/components/PaperCover'
-import PerformanceView from '@/components/PerformanceView'
 import RunPanel from '@/components/RunPanel'
+import VerifyPanel, { LevelBadge } from '@/components/VerifyPanel'
 import { applyAnswerKeyText } from '@/lib/answerKey'
 import { db } from '@/lib/db'
 import { formatRate, gradeRun, questionStats } from '@/lib/grading'
 import { makeId, paperTitle, QUESTION_TYPES } from '@/lib/schema'
 import { navigate, useStore } from '@/lib/store'
+import { validateStored } from '@/lib/verify'
 
 const TABS = [
   ['cover', '표지'],
   ['paper', '문제지'],
   ['key', '정답·배점'],
-  ['omr', 'OMR'],
-  ['sim', 'AI 풀이 보기'],
-  ['results', '결과'],
-  ['perf', '성능 평가']
+  ['check', '검증'],
+  ['sim', 'AI 풀이'],
+  ['omr', 'OMR 채점'],
+  ['results', '채점 결과']
 ]
 
 /** @brief 현재 시각(ms) - 이벤트 처리 중에만 호출 */
@@ -126,6 +127,7 @@ export default function PaperPage({ paperId, tab, runId, edit }) {
             <span className="chip">{paper.meta.year}학년도</span>
             <span className="chip">{paper.questions.length}문항</span>
             <span className="chip">풀이 {runs.length}건</span>
+            <VerifyChip paper={paper} runs={runs} onClick={() => setTab('check')} />
             {paper.isDemo && <span className="chip !bg-red-50 !text-[var(--color-pen)]">예시 데이터</span>}
           </div>
         </div>
@@ -184,14 +186,26 @@ export default function PaperPage({ paperId, tab, runId, edit }) {
         </div>
       )}
 
+      {tab === 'check' && <VerifyPanel paper={paper} files={files} runs={runs} onChange={setPaper} onEditQuestion={() => setTab('key')} />}
+
       {tab === 'omr' && <OmrTab key={runId || 'answer-key'} paper={paper} runs={runs} runId={runId} edit={edit} />}
 
       {tab === 'sim' && <SolveViewer key={paper.id} paper={paper} runs={runs} files={files} initialRunId={runId} />}
 
       {tab === 'results' && <ResultsTab paper={paper} runs={runs} files={files} />}
 
-      {tab === 'perf' && <PerformanceView paper={paper} runs={runs} />}
     </div>
+  )
+}
+
+/** @brief 머리말의 검증 결과 표시 (누르면 검증 탭) */
+function VerifyChip({ paper, runs, onClick }) {
+  const result = validateStored(paper, runs)
+  const label = result.status === 'error' ? `검증 오류 ${result.counts.error}` : result.status === 'warn' ? `확인 필요 ${result.counts.warn}` : '검증 통과'
+  return (
+    <button type="button" onClick={onClick} className="hover:opacity-80">
+      <LevelBadge level={result.status}>{label}</LevelBadge>
+    </button>
   )
 }
 
@@ -318,7 +332,7 @@ function ResultsTab({ paper, runs, files }) {
       <RunPanel paper={paper} files={files} />
 
       <div className="card p-4 sm:p-6">
-        <h3 className="text-lg font-extrabold mb-4">성적표</h3>
+        <h3 className="text-lg font-extrabold mb-4">AI 채점 결과</h3>
         {results.length === 0 ? (
           <p className="py-8 text-center text-[var(--color-ink-soft)]">아직 풀이 기록이 없습니다. 위에서 AI로 풀거나 결과를 추가하세요.</p>
         ) : (
@@ -395,7 +409,8 @@ function ResultsTab({ paper, runs, files }) {
             </div>
           </div>
           <div className="card p-4 sm:p-6">
-            <h3 className="text-lg font-extrabold mb-3">AI가 가장 많이 틀린 문항</h3>
+            <h3 className="text-lg font-extrabold">AI가 가장 많이 틀린 문항</h3>
+            <p className="mb-3 text-xs text-[var(--color-ink-soft)]">AI가 틀린 문항은 정답이나 문제에 오류가 없는지 한 번 더 확인해 보세요.</p>
             {hardest.length === 0 ? <p className="text-sm text-[var(--color-ink-soft)]">채점된 문항이 없습니다.</p> : (
               <ol className="space-y-2">
                 {hardest.map(item => (

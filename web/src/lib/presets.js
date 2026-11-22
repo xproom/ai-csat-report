@@ -5,6 +5,8 @@
  * 배점은 대표적인 배분입니다(총점이 맞도록 잡은 값). 실제 정답표에 배점이 있으면 그 값으로 덮어씁니다.
  */
 
+import { normalizeChoiceSet } from './grading.js'
+
 /** 표준 구성을 쓰는 시험 종류 */
 export const STANDARD_EXAM_TYPES = ['수능', '모의고사', '모의평가']
 
@@ -96,7 +98,7 @@ export function questionsFromAnswerKey(entries, meta) {
         type,
         choices: base?.choices ?? 5,
         points,
-        answer: type === 'choice' ? (text.match(/[1-5]/)?.[0] ?? '') : text,
+        answer: type === 'choice' ? normalizeChoiceSet(text) : text,
         unit: '',
         ...(base?.elective ? { elective: true } : {})
       }

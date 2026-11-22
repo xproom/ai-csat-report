@@ -1,10 +1,11 @@
 /**
  * @file store.jsx
- * @brief 앱 전역 데이터(평가지·풀이 기록)와 해시 라우터, 알림
+ * @brief 앱 전역 데이터(평가지·풀이 기록), 중앙 서버 로그인 상태, 해시 라우터, 알림
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { db } from './db'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createCloudDb, getCloudConfig, getSupabase } from './cloud'
+import { db, setBackend } from './db'
 
 const StoreContext = createContext(null)
 
@@ -14,6 +15,9 @@ export function StoreProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [toast, setToast] = useState(null)
+  // 중앙 서버(Supabase): configured=연결 정보 있음, user=로그인한 교사, ready=로그인 상태 확인 끝
+  const [cloud, setCloud] = useState(() => ({ configured: Boolean(getCloudConfig()), user: null, ready: !getCloudConfig() }))
+  const userIdRef = useRef(undefined)
 
   const refresh = useCallback(async () => {
     try {
@@ -28,7 +32,27 @@ export function StoreProvider({ children }) {
     }
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => {
+    const supabase = getSupabase()
+    if (!supabase) {
+      refresh()
+      return undefined
+    }
+    // 로그인한 사용자가 바뀔 때만 저장소를 바꿈 (토큰 갱신 때는 그대로)
+    const apply = session => {
+      const user = session?.user ?? null
+      setCloud({ configured: true, user, ready: true })
+      if (userIdRef.current === (user?.id ?? null)) return
+      userIdRef.current = user?.id ?? null
+      setBackend(user ? createCloudDb(supabase, user.id) : null)
+      setLoading(true)
+      refresh()
+    }
+    supabase.auth.getSession().then(({ data }) => apply(data.session), () => apply(null))
+    // 인증 이벤트 안에서 바로 Supabase를 부르면 막힐 수 있어 한 박자 늦게 처리
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => { setTimeout(() => apply(session), 0) })
+    return () => data.subscription.unsubscribe()
+  }, [refresh])
 
   const notify = useCallback((message, tone = 'ok') => {
     setToast({ message, tone, key: Date.now() })
@@ -40,7 +64,7 @@ export function StoreProvider({ children }) {
     return () => clearTimeout(timer)
   }, [toast])
 
-  const value = useMemo(() => ({ papers, runs, loading, error, refresh, notify, toast }), [papers, runs, loading, error, refresh, notify, toast])
+  const value = useMemo(() => ({ papers, runs, loading, error, refresh, notify, toast, cloud }), [papers, runs, loading, error, refresh, notify, toast, cloud])
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
 

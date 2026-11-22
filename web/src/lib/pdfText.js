@@ -25,7 +25,7 @@ export function findAnchors(items, maxNo) {
     if (!match) continue
     const no = Number(match[1])
     if (no < 1 || no > maxNo) continue
-    candidates.push({ no, col: item.x0 < 0.5 ? 0 : 1, x0: item.x0, top: item.top })
+    candidates.push({ no, col: item.x0 < 0.5 ? 0 : 1, x0: item.x0, top: item.top, item })
   }
   // 단마다 가장 왼쪽 근처에 있는 번호만 문항 번호로 인정 (본문 속 "2." 같은 숫자는 제외)
   const anchors = []
@@ -145,4 +145,139 @@ export async function buildQuestionIndex(file, paper) {
   indexCache.set(key, promise)
   promise.catch(() => indexCache.delete(key))
   return promise
+}
+
+/* ───────────── 검증용: 문제지에서 읽어 낸 사실(문항 번호·배점 표시·선지·쪽 번호) ───────────── */
+
+const CIRCLED_MARKS = '①②③④⑤⑥⑦⑧⑨⑩'
+const POINTS_PATTERN = /[[［(（]\s*(\d+(?:\.\d+)?)\s*점\s*[\]］)）]/
+const DEFAULT_POINTS_PATTERN = /표시가\s*없는\s*문항은\s*(?:모두\s*)?(\d+(?:\.\d+)?)\s*점/
+// "모두 고르시오", "두 개 고르면" 같은 복수 선택 문항 ("모두 고른 것은?"은 조합형 단일 정답이라 제외)
+const MULTI_PATTERN = /(모두|있는\s*대로|두\s*개|2\s*개|세\s*개|3\s*개|두\s*가지|2\s*가지|세\s*가지|3\s*가지)\s*(?:를|을|만|씩)?\s*(?:골라|고르시오|고르세요|고르면|고르라|찾으시오|찾아\s*쓰|택하시오)/
+
+/** @brief 글자 조각을 읽는 순서(위→아래, 같은 줄은 왼쪽→오른쪽)로 정렬 */
+function readingOrder(items) {
+  const sorted = [...items].sort((a, b) => a.top - b.top)
+  const lines = []
+  for (const item of sorted) {
+    const line = lines.at(-1)
+    if (line && Math.abs(line[0].top - item.top) < 0.007) line.push(item)
+    else lines.push([item])
+  }
+  return lines.flatMap(line => line.sort((a, b) => a.x0 - b.x0))
+}
+
+/** @brief 문항 글에서 선지 번호(①~⑤)와 선지 내용, 복수 선택 여부, 배점 표시 읽기 */
+export function analyzeQuestionText(text) {
+  const marks = []
+  const positions = []
+  for (let index = 0; index < text.length; index += 1) {
+    const mark = CIRCLED_MARKS.indexOf(text[index])
+    if (mark !== -1) { marks.push(mark + 1); positions.push(index) }
+  }
+  const options = positions.map((start, index) => text.slice(start + 1, positions[index + 1] ?? text.length).trim())
+  // 마지막 선지 뒤에 붙은 다른 글(그림 설명·안내문)은 다른 선지 길이에 맞춰 잘라 냄
+  if (options.length > 1) {
+    const longest = Math.max(...options.slice(0, -1).map(option => option.length))
+    options[options.length - 1] = options.at(-1).slice(0, longest * 2 + 6).trim()
+  }
+  const stem = positions.length ? text.slice(0, positions[0]) : text
+  const multi = stem.match(MULTI_PATTERN)
+  const countWord = multi?.[1]?.replace(/\s/g, '') ?? ''
+  const multipleCount = /^(두|2)/.test(countWord) ? 2 : /^(세|3)/.test(countWord) ? 3 : 0
+  const points = stem.match(POINTS_PATTERN) ?? text.match(POINTS_PATTERN)
+  return {
+    marks,
+    options: options.map(option => option.slice(0, 80)),
+    asksMultiple: Boolean(multi),
+    multipleCount,
+    printedPoints: points ? Number(points[1]) : 0,
+    stem: stem.replace(/\s+/g, ' ').trim().slice(0, 90)
+  }
+}
+
+/** @brief 쪽 위·아래 여백에서 쪽 번호 후보 찾기 ("3", "- 3 -", "3쪽", "3 / 8") */
+export function pageNumberCandidates(items) {
+  const candidates = []
+  const zones = [
+    ['footer', items.filter(item => item.top > 0.9)],
+    ['header', items.filter(item => item.bottom < 0.09)]
+  ]
+  for (const [zone, zoneItems] of zones) {
+    const line = readingOrder(zoneItems).map(item => item.str).join(' ')
+    const fraction = line.match(/(\d{1,3})\s*[/／]\s*(\d{1,3})/)
+    if (fraction) candidates.push({ value: Number(fraction[1]), total: Number(fraction[2]), slot: `${zone}-fraction` })
+    for (const item of zoneItems) {
+      const match = item.str.trim().match(/^[-–—(]?\s*(\d{1,3})\s*(?:쪽|[-–—)])?$/)
+      if (!match) continue
+      const center = (item.x0 + item.x1) / 2
+      const side = center < 0.35 ? 'left' : center > 0.65 ? 'right' : 'center'
+      candidates.push({ value: Number(match[1]), total: 0, slot: `${zone}-${side}` })
+    }
+  }
+  return candidates
+}
+
+/**
+ * @brief 문제지 PDF들에서 검증에 쓸 사실을 읽어 냄 (텍스트가 들어 있는 PDF만, API 사용 없음)
+ * @param {Array<{ id, name, type, blob }>} files
+ * @param {Object} paper
+ * @returns {Promise<Object>} facts { source:'pdf', pageCount, readable, pages, anchors, questions, defaultPoints }
+ */
+export async function extractPaperFacts(files, paper) {
+  const pdfFiles = files.filter(file => file?.type === 'application/pdf')
+  const maxNo = Math.max(1, ...paper.questions.map(question => question.no))
+  const pages = []
+  const segments = []
+  let allText = ''
+  let index = 0
+  let current = null
+  for (const file of pdfFiles) {
+    const pdf = await openPdf(file)
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      index += 1
+      const items = await pageItems(pdf, pageNumber)
+      const text = items.map(item => item.str).join('')
+      allText += `${text}
+`
+      pages.push({ index, fileName: file.name, page: pageNumber, candidates: pageNumberCandidates(items), compact: text.replace(/\s+/g, '') })
+      const anchors = findAnchors(items, maxNo)
+      const anchorItems = new Map(anchors.map(anchor => [anchor.item, anchor.no]))
+      const body = items.filter(item => item.top > 0.04 && item.top < 0.94)
+      const twoColumns = anchors.some(anchor => anchor.col === 1)
+      const ordered = twoColumns
+        ? [...readingOrder(body.filter(item => item.x0 < 0.5)), ...readingOrder(body.filter(item => item.x0 >= 0.5))]
+        : readingOrder(body)
+      for (const item of ordered) {
+        if (anchorItems.has(item)) {
+          current = { no: anchorItems.get(item), index, parts: [] }
+          segments.push(current)
+        }
+        current?.parts.push(item.str)
+      }
+    }
+  }
+
+  const elective = String(paper.meta?.elective ?? '').replace(/\s+/g, '')
+  const electiveStart = elective ? pages.find(page => page.compact.includes(elective))?.index : undefined
+  const questions = {}
+  for (const question of paper.questions) {
+    const list = segments.filter(segment => segment.no === question.no)
+    const chosen = (question.elective && electiveStart ? list.find(segment => segment.index >= electiveStart) : null) ?? list[0]
+    if (!chosen) continue
+    questions[question.no] = { index: chosen.index, ...analyzeQuestionText(chosen.parts.join(' ')) }
+  }
+  const defaultPoints = allText.match(DEFAULT_POINTS_PATTERN)
+  return {
+    source: 'pdf',
+    createdAt: new Date().toISOString(),
+    fileKey: pdfFiles.map(file => file.id).join(','),
+    pageCount: index,
+    readable: allText.replace(/\s+/g, '').length > 40,
+    pages: pages.map(page => ({ index: page.index, fileName: page.fileName, page: page.page, candidates: page.candidates })),
+    anchors: segments.map(segment => ({ no: segment.no, index: segment.index })),
+    questions,
+    defaultPoints: defaultPoints ? Number(defaultPoints[1]) : 0,
+    electiveStart: electiveStart ?? 0
+  }
 }

@@ -1,7 +1,9 @@
 /**
  * @file db.js
- * @brief IndexedDB 저장소 (평가지, 문제지 파일, 풀이 기록)
- * @note 모든 데이터는 사용자의 브라우저에만 저장됩니다. 서버로 보내지 않습니다.
+ * @brief 저장소 (평가지, 문제지 파일, 풀이 기록)
+ * - 기본: 브라우저 IndexedDB (localDb) - 이 브라우저에만 저장
+ * - Supabase에 로그인하면 setBackend(cloudDb)로 중앙 서버 저장소로 바뀜 (cloud.js)
+ * - 화면 코드는 늘 db를 쓰면 되고, 지금 어느 저장소인지는 db.kind로 알 수 있음
  */
 
 const DB_NAME = 'exam-bench'
@@ -51,7 +53,9 @@ function requestToPromise(request) {
   })
 }
 
-export const db = {
+export const localDb = {
+  kind: 'local',
+
   async listPapers() {
     const papers = await withStore('papers', 'readonly', store => requestToPromise(store.getAll()))
     return papers.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -121,6 +125,21 @@ export const db = {
     for (const name of STORES) await withStore(name, 'readwrite', store => store.clear())
   }
 }
+
+let backend = localDb
+
+/** @brief 저장소 바꾸기 (로그인 → 클라우드, 로그아웃 → 브라우저) */
+export function setBackend(next) {
+  backend = next ?? localDb
+}
+
+/** @brief 지금 쓰는 저장소로 연결되는 db (함수 모양은 localDb와 같음) */
+export const db = new Proxy({}, {
+  get(_, key) {
+    const value = backend[key]
+    return typeof value === 'function' ? value.bind(backend) : value
+  }
+})
 
 export function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {

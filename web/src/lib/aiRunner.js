@@ -172,14 +172,14 @@ export async function runClaudeOnPaper({ apiKey, model, effort = 'high', paper, 
  * @brief Claude 요청 공통 처리 (구조화 출력, 거절 시 서버 측 대체 모델, 거절 응답 오류 처리)
  * @returns {Promise<{ response, text: string, durationMs: number }>} durationMs는 요청 시작부터 응답까지의 실제 시간
  */
-async function callClaude({ apiKey, modelInfo, effort, system, content, signal }) {
+async function callClaude({ apiKey, modelInfo, effort, system, content, signal, schema = ANSWER_SCHEMA }) {
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
   const started = performance.now()
   const request = {
     model: modelInfo.id,
     max_tokens: 16000,
     system,
-    output_config: { effort, format: { type: 'json_schema', schema: ANSWER_SCHEMA } },
+    output_config: { effort, format: { type: 'json_schema', schema } },
     messages: [{ role: 'user', content }]
   }
 
@@ -301,4 +301,115 @@ export function importRuns(json, paper) {
       note: item.note || ''
     }
   })
+}
+
+/* ───────────── 문제지 검증용: AI가 문제지를 읽고 사실만 기록 (풀지 않음) ───────────── */
+
+const VERIFY_SCHEMA = {
+  type: 'object',
+  properties: {
+    pages: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          index: { type: 'integer', description: '첨부 순서대로 센 쪽 순서 (1부터)' },
+          printed: { type: 'integer', description: '쪽에 인쇄된 쪽 번호, 없으면 0' },
+          printedTotal: { type: 'integer', description: '"3/8"처럼 전체 쪽 수가 인쇄돼 있으면 그 값, 없으면 0' }
+        },
+        required: ['index', 'printed', 'printedTotal'],
+        additionalProperties: false
+      }
+    },
+    questions: {
+      type: 'array',
+      description: '문제지에 나온 순서대로 모든 문항 (같은 번호가 두 번 나오면 두 번 모두)',
+      items: {
+        type: 'object',
+        properties: {
+          no: { type: 'integer' },
+          page: { type: 'integer', description: '문항이 시작하는 쪽 순서' },
+          printedPoints: { type: 'number', description: '문항에 [3점]처럼 인쇄된 배점, 없으면 0' },
+          choiceMarks: { type: 'array', items: { type: 'integer' }, description: '문항에 인쇄된 선지 번호를 나온 순서대로 (①→1). 객관식이 아니면 빈 배열' },
+          options: { type: 'array', items: { type: 'string' }, description: '선지 내용을 choiceMarks 순서대로 30자 이내로. 그림이면 "[그림]"' },
+          asksMultiple: { type: 'boolean', description: '"모두 고르시오", "두 개 고르면"처럼 답을 여러 개 고르게 하면 true. "모두 고른 것은?"처럼 조합 선지 하나를 고르면 false' },
+          multipleCount: { type: 'integer', description: '고를 개수가 정해져 있으면 그 수 (두 개 → 2), 아니면 0' }
+        },
+        required: ['no', 'page', 'printedPoints', 'choiceMarks', 'options', 'asksMultiple', 'multipleCount'],
+        additionalProperties: false
+      }
+    },
+    defaultPoints: { type: 'number', description: '"점수 표시가 없는 문항은 모두 2점"처럼 안내가 있으면 그 점수, 없으면 0' },
+    notes: { type: 'array', items: { type: 'string' }, description: '인쇄 오류·오탈자·문항 번호 이상 등 눈에 띈 문제 (없으면 빈 배열)' }
+  },
+  required: ['pages', 'questions', 'defaultPoints', 'notes'],
+  additionalProperties: false
+}
+
+const VERIFY_PROMPT = `당신은 학교 시험 문제지를 검토하는 교사입니다. 문제를 풀지 말고, 첨부한 문제지를 보이는 그대로 읽어 기록합니다.
+- 모든 쪽의 인쇄된 쪽 번호를 읽습니다. 첨부 파일이 여러 개면 첨부 순서대로 쪽 순서를 이어서 셉니다.
+- 문제지에 나온 순서대로 모든 문항 번호를 적습니다. 번호를 고치거나 빠진 번호를 채우지 말고, 인쇄된 번호 그대로 적습니다.
+- 객관식 선지 번호(①~⑤)는 실제로 인쇄된 것만 순서대로 적습니다. 빠지거나 겹친 번호도 그대로 적습니다.
+- 배점 표시는 인쇄된 것만 적습니다. 추측하지 않습니다.`
+
+/**
+ * @brief AI가 문제지를 읽어 검증용 사실(facts)을 만듦 - verify.validatePaper에 그대로 넣을 수 있는 형태
+ * @returns {Promise<Object>} facts { source:'ai', pages, anchors, questions, defaultPoints, notes }
+ */
+export async function verifyPaperWithClaude({ apiKey, model = CLAUDE_MODELS[0].id, paper, files, signal }) {
+  if (!apiKey) throw new Error('AI 정밀 검증을 하려면 설정에서 Anthropic API 키를 입력하세요.')
+  if (!files.length) throw new Error('검증할 문제지 파일이 없습니다.')
+  const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
+  const blocks = []
+  for (const file of files) blocks.push(await fileToBlock(file))
+  const { text, response, durationMs } = await callClaude({
+    apiKey,
+    modelInfo,
+    effort: 'medium',
+    system: VERIFY_PROMPT,
+    schema: VERIFY_SCHEMA,
+    content: [...blocks, { type: 'text', text: `교사가 입력한 문항 구성(참고용, 문제지와 다르면 문제지 그대로 적을 것): ${paper.questions.length}문항\n${describeQuestions(paper)}` }],
+    signal
+  })
+  let data
+  try {
+    data = JSON.parse(text)
+  } catch {
+    throw new Error('AI 검증 결과를 읽지 못했습니다. 다시 시도해 주세요.')
+  }
+  const questions = {}
+  for (const item of data.questions ?? []) {
+    // 같은 번호가 여러 번 나오면(선택과목 등) 처음 나온 것으로 문항 정보를 씀. 중복 자체는 anchors로 검사
+    if (questions[item.no]) continue
+    questions[item.no] = {
+      index: item.page,
+      printedPoints: Number(item.printedPoints) || 0,
+      marks: item.choiceMarks ?? [],
+      options: (item.options ?? []).map(option => (option === '[그림]' ? '' : String(option))),
+      asksMultiple: Boolean(item.asksMultiple),
+      multipleCount: Number(item.multipleCount) || 0,
+      stem: ''
+    }
+  }
+  // 첨부 파일별 쪽 수를 몰라 쪽 번호는 한 묶음으로 봄
+  const pages = (data.pages ?? []).map(page => ({
+    index: page.index,
+    fileName: files.length === 1 ? files[0].name : '문제지',
+    page: page.index,
+    candidates: page.printed > 0 ? [{ value: page.printed, total: page.printedTotal || 0, slot: 'ai' }] : []
+  }))
+  return {
+    source: 'ai',
+    model: modelInfo.label,
+    createdAt: new Date().toISOString(),
+    durationMs,
+    usage: { inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0 },
+    readable: true,
+    pageCount: pages.length,
+    pages,
+    anchors: (data.questions ?? []).map(item => ({ no: item.no, index: item.page })),
+    questions,
+    defaultPoints: Number(data.defaultPoints) || 0,
+    notes: data.notes ?? []
+  }
 }

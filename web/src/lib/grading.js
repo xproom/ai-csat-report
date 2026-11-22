@@ -47,6 +47,27 @@ export function normalizeChoice(value) {
 }
 
 /**
+ * @brief 객관식 정답을 선지 번호 묶음으로 정리 (복수 정답 지원)
+ * - "③" → "3", "②④"·"2,4"·"2|4"·"2 4"·"24" → "2,4" (작은 번호부터, 중복 제거)
+ * - 두 자리 이상 숫자는 선지 번호를 붙여 쓴 것으로 보고 한 자리씩 나눔
+ */
+export function normalizeChoiceSet(value) {
+  const text = String(value ?? '').normalize('NFKC').replace(/[①-⑩]/g, char => ` ${'①②③④⑤⑥⑦⑧⑨⑩'.indexOf(char) + 1} `)
+  const digits = []
+  for (const group of text.match(/\d+/g) ?? []) {
+    if (group.length > 1 && group !== '10') digits.push(...group.split('').map(Number))
+    else digits.push(Number(group))
+  }
+  return [...new Set(digits.filter(digit => digit > 0))].sort((a, b) => a - b).join(',')
+}
+
+/** @brief 객관식 정답 묶음 → 번호 배열 */
+export function choiceList(value) {
+  const set = normalizeChoiceSet(value)
+  return set ? set.split(',').map(Number) : []
+}
+
+/**
  * @brief 한 풀이 기록 채점
  * @returns {{
  *   score: number, maxScore: number, rate: number, correct: number, total: number,
@@ -82,7 +103,8 @@ export function gradeRun(paper, run) {
       invalid += 1
       correct = false
     } else if (question.type === 'choice') {
-      correct = normalizeChoice(given) !== '' && normalizeChoice(given) === normalizeChoice(question.answer)
+      // 복수 정답은 고른 번호 묶음이 정확히 같아야 정답
+      correct = normalizeChoiceSet(given) !== '' && normalizeChoiceSet(given) === normalizeChoiceSet(question.answer)
     } else if (question.type === 'short') {
       correct = isShortAnswerCorrect(given, question.answer)
     }

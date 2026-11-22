@@ -1,8 +1,9 @@
 /**
  * @file NewPaperPage.jsx
- * @brief 새 평가지 만들기 - 1) 표지 옵션 2) 문제지·정답 3) AI 풀어보기
+ * @brief 새 평가지 만들기 - 1) 표지 옵션 2) 문제지·정답 3) 검증 4) AI 풀어보기
  *
- * 3단계에 들어가면 평가지를 자동 저장하고, 바로 AI가 문제지를 실시간으로 풀며
+ * 3단계(검증)에서 배점·총점, 문항 번호, 유형 구성, 객관식 선지, 정답 표기, 쪽 번호를 확인합니다.
+ * 4단계에 들어가면 평가지를 자동 저장하고, 바로 AI가 문제지를 실시간으로 풀며
  * OMR에 마킹하고 실제 정답과 비교해 채점하는 화면(AI 풀이 보기)을 보여줍니다.
  * 이전 단계로 돌아가 고친 뒤 다시 3단계로 오면 바뀐 내용이 다시 저장됩니다.
  */
@@ -14,13 +15,15 @@ import CoverOptionsForm from '@/components/CoverOptionsForm'
 import { FileUploader } from '@/components/FileUploader'
 import PaperCover from '@/components/PaperCover'
 import SolveViewer from '@/components/SolveViewer'
+import VerifyPanel from '@/components/VerifyPanel'
 import { applyAnswerKeyText } from '@/lib/answerKey'
 import { db } from '@/lib/db'
 import { createPaper, makeId, missingAnswers, paperTitle } from '@/lib/schema'
 import { navigate, useStore } from '@/lib/store'
 
-const STEPS = ['표지 옵션', '문제지·정답', 'AI 풀어보기']
-const AI_STEP = 2
+const STEPS = ['표지 옵션', '문제지·정답', '검증', 'AI 풀어보기']
+const VERIFY_STEP = 2
+const AI_STEP = 3
 
 export default function NewPaperPage() {
   const { runs: allRuns, refresh, notify } = useStore()
@@ -53,10 +56,9 @@ export default function NewPaperPage() {
   }
 
   const goTo = async index => {
-    if (index !== AI_STEP) { setStep(index); return }
-    // 반영하지 않은 정답표가 있으면 반영할지 물음 (반영 안 하고 넘어가면 정답 없이 채점됨)
+    // 반영하지 않은 정답표가 있으면 반영할지 물음 (반영 안 하고 넘어가면 정답 없이 검증·채점됨)
     let current = paper
-    if (pendingKey) {
+    if (pendingKey && index >= VERIFY_STEP) {
       if (window.confirm(`올린 정답표(${pendingKey.fileName})를 아직 반영하지 않았습니다. 반영하고 넘어갈까요?
 취소를 누르면 정답 없이 넘어갑니다.`)) {
         const result = applyAnswerKeyText(paper, pendingKey.text, { fileName: pendingKey.fileName, restructure: 'auto' })
@@ -66,6 +68,7 @@ export default function NewPaperPage() {
       }
       setPendingKey(null)
     }
+    if (index !== AI_STEP) { setStep(index); window.scrollTo({ top: 0 }); return }
     setSaving(true)
     try {
       const records = await persist(current)
@@ -85,11 +88,11 @@ export default function NewPaperPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">새 평가지 만들기</h1>
-        <p className="mt-1 text-[var(--color-ink-soft)]">표지를 꾸미고, 문제지와 정답을 올린 뒤, AI가 문제를 풀며 OMR에 마킹하고 채점하는 모습을 바로 확인하세요.</p>
+        <p className="mt-1 text-[var(--color-ink-soft)] break-keep">문제지와 정답을 올리면 배점·문항 번호·선지·정답 표기·쪽 번호를 검증하고, AI가 문제지에 풀이를 적으며 OMR로 채점합니다.</p>
       </div>
 
       {/* 단계 표시 */}
-      <ol className="grid grid-cols-3 gap-2">
+      <ol className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {STEPS.map((label, index) => (
           <li key={label}>
             <button
@@ -108,7 +111,20 @@ export default function NewPaperPage() {
         ))}
       </ol>
 
-      {step === AI_STEP ? (
+      {step === VERIFY_STEP ? (
+        <div className="space-y-4">
+          <VerifyPanel paper={paper} files={files} runs={runs} onChange={setPaper} onEditQuestion={() => goTo(1)} />
+          <div className="card p-4 flex flex-wrap items-center justify-between gap-3">
+            <button type="button" className="btn btn-ghost" disabled={saving} onClick={() => goTo(1)}>← 문제지·정답 고치기</button>
+            <div className="flex flex-wrap items-center gap-3">
+              {!files.length && <span className="text-xs text-[var(--color-ink-soft)]">문제지가 없으면 AI 풀이는 할 수 없습니다</span>}
+              <button type="button" className="btn btn-primary" disabled={saving} onClick={() => goTo(AI_STEP)}>
+                {saving ? '저장 중…' : '저장하고 AI 풀어보기 →'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : step === AI_STEP ? (
         <div className="space-y-4">
           <div className="card p-4 flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -120,7 +136,7 @@ export default function NewPaperPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn btn-ghost" onClick={() => goTo(1)}>← 문제지·정답 고치기</button>
-              <button type="button" className="btn btn-primary" onClick={() => navigate(`/paper/${paper.id}?tab=${runs.length ? 'perf' : 'results'}`)}>평가지 상세로 이동 →</button>
+              <button type="button" className="btn btn-primary" onClick={() => navigate(`/paper/${paper.id}?tab=${runs.length ? 'results' : 'check'}`)}>평가지 상세로 이동 →</button>
             </div>
           </div>
           <SolveViewer key={paper.id} paper={paper} runs={runs} files={files} />
@@ -154,9 +170,7 @@ export default function NewPaperPage() {
                 <div className="flex flex-wrap items-center gap-3">
                   {!files.length && <span className="text-xs text-[var(--color-ink-soft)]">문제지가 없으면 AI 풀이는 할 수 없습니다</span>}
                   {missing.length > 0 && <span className="text-xs text-[var(--color-pen)]">정답 미입력 {missing.length}문항</span>}
-                  <button type="button" className="btn btn-primary" disabled={saving} onClick={() => goTo(AI_STEP)}>
-                    {saving ? '저장 중…' : '저장하고 AI 풀어보기 →'}
-                  </button>
+                  <button type="button" className="btn btn-primary" disabled={saving} onClick={() => goTo(VERIFY_STEP)}>다음: 검증 →</button>
                 </div>
               )}
             </div>

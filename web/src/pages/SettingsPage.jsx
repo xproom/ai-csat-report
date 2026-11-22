@@ -1,16 +1,17 @@
 /**
  * @file SettingsPage.jsx
- * @brief API 키, 데이터 백업·복원·초기화, 예시 데이터
+ * @brief 중앙 서버(Supabase) 연결, API 키, 데이터 백업·복원·초기화, 예시 데이터
  */
 
 import { useState } from 'react'
+import CloudPanel from '@/components/CloudPanel'
 import { db } from '@/lib/db'
 import { loadDemo } from '@/lib/demo'
 import { getApiKey, isKeyRemembered, setApiKey } from '@/lib/settings'
 import { useStore } from '@/lib/store'
 
 export default function SettingsPage() {
-  const { papers, runs, refresh, notify } = useStore()
+  const { papers, runs, refresh, notify, cloud } = useStore()
   const [key, setKey] = useState(getApiKey)
   const [remember, setRemember] = useState(isKeyRemembered)
   const [show, setShow] = useState(false)
@@ -59,8 +60,10 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">설정</h1>
-        <p className="mt-1 text-[var(--color-ink-soft)]">모든 데이터는 이 브라우저(IndexedDB)에만 저장됩니다.</p>
+        <p className="mt-1 text-[var(--color-ink-soft)]">{cloud.user ? `자료는 중앙 서버에 저장됩니다 (${cloud.user.email}).` : '로그인하지 않으면 자료는 이 브라우저(IndexedDB)에만 저장됩니다.'}</p>
       </div>
+
+      <CloudPanel />
 
       <section className="card p-4 sm:p-6 space-y-4">
         <div>

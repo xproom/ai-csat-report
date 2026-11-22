@@ -76,7 +76,7 @@ export default function AnswerKeyUpload({ paper, onApply, onPendingChange }) {
   }
 
   const apply = () => {
-    onApply(applyAnswerKey(paper, parsed.entries, { fileName: fileName || '직접 붙여넣기', applyPoints }))
+    onApply(applyAnswerKey(paper, parsed.entries, { fileName: fileName || '직접 붙여넣기', applyPoints, parsed }))
     setText('')
     setFileName('')
   }

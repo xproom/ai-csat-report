@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useRef } from 'react'
-import { normalizeChoice } from '@/lib/grading'
+import { choiceList } from '@/lib/grading'
 
 /** @brief 0~999 정수 답이면 세 자리 문자열 배열 */
 function digitCells(answer) {
@@ -84,7 +84,7 @@ export default function CompactOmr({ paper, answers, currentNo, gradedItems = nu
               <span className="w-6 text-right font-mono text-[0.7rem] font-bold tabular-nums text-[var(--color-ink)]">{question.no}</span>
               <span className="flex flex-1 items-center gap-[5px] min-w-0">
                 {question.type === 'choice' && Array.from({ length: question.choices }, (_, index) => String(index + 1)).map(digit => (
-                  <Bubble key={digit} digit={digit} filled={normalizeChoice(answer) === digit} />
+                  <Bubble key={digit} digit={digit} filled={choiceList(answer).includes(Number(digit))} />
                 ))}
                 {question.type === 'short' && (() => {
                   const cells = digitCells(answer)

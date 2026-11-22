@@ -1,23 +1,24 @@
 /**
  * @file DashboardPage.jsx
- * @brief 평가 결과 대시보드 - 모델 순위, 과목별 히트맵, 문항 유형별·학년별 득점률
+ * @brief 검증 현황 - 평가지별 문제지·정답 검증 결과와 AI 채점 결과를 한눈에
+ *
+ * - 저장된 검증 정보(문제지에서 읽은 사실)로 다시 검사하므로 문제지를 다시 읽지 않음
+ * - 항목별(배점·번호·구성·선지·정답·쪽 번호·AI 대조)로 오류가 많은 곳을 보여 줌
  */
 
 import { useMemo, useState } from 'react'
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { formatRate, gradeRun, modelLeaderboard } from '@/lib/grading'
-import { EXAM_TYPES, GRADES, QUESTION_TYPES, SCHOOL_LEVELS, SCHOOL_SHORT, SUBJECTS, paperTitle } from '@/lib/schema'
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { formatRate, gradeRun } from '@/lib/grading'
+import { EXAM_TYPES, SCHOOL_LEVELS, SCHOOL_SHORT, SUBJECTS, paperTitle } from '@/lib/schema'
 import { useStore } from '@/lib/store'
+import { LEVEL_LABEL, validateStored } from '@/lib/verify'
 
-const PALETTE = ['#1f3a5f', '#c8a24a', '#2f7d5b', '#d62839', '#6b4fa0', '#2b8aa8', '#b35c2e', '#5b6478']
-
-/** @brief 득점률 → 히트맵 배경색 */
-function heatColor(rate) {
-  if (rate == null) return '#f1ede4'
-  // 40% 이하 빨강 → 100% 초록
-  const t = Math.min(1, Math.max(0, (rate - 0.4) / 0.6))
-  return `hsl(${4 + t * 136} 60% ${90 - t * 22}%)`
+const STATUS_STYLE = {
+  error: 'bg-red-50 text-[var(--color-pen)] border-red-200',
+  warn: 'bg-amber-50 text-amber-900 border-amber-200',
+  ok: 'bg-emerald-50 text-emerald-900 border-emerald-200'
 }
+const STATUS_TEXT = { error: '오류 있음', warn: '확인 필요', ok: '통과' }
 
 function Select({ label, value, options, onChange }) {
   return (
@@ -30,11 +31,11 @@ function Select({ label, value, options, onChange }) {
   )
 }
 
-function Kpi({ label, value, sub }) {
+function Kpi({ label, value, sub, tone = '' }) {
   return (
     <div className="card p-4 sm:p-5">
       <div className="text-xs font-bold text-[var(--color-ink-soft)]">{label}</div>
-      <div className="mt-1 text-2xl sm:text-3xl font-extrabold tabular-nums tracking-tight">{value}</div>
+      <div className={`mt-1 text-2xl sm:text-3xl font-extrabold tabular-nums tracking-tight ${tone}`}>{value}</div>
       {sub && <div className="mt-0.5 text-xs text-[var(--color-ink-soft)] truncate">{sub}</div>}
     </div>
   )
@@ -43,241 +44,131 @@ function Kpi({ label, value, sub }) {
 export default function DashboardPage() {
   const { papers, runs } = useStore()
   const [level, setLevel] = useState('전체')
-  const [grade, setGrade] = useState('전체')
   const [subject, setSubject] = useState('전체')
   const [examType, setExamType] = useState('전체')
-  const hasReal = runs.some(run => !run.isDemo)
+  const [status, setStatus] = useState('전체')
+  const hasReal = papers.some(paper => !paper.isDemo)
   const [includeDemo, setIncludeDemo] = useState(!hasReal)
 
   const entries = useMemo(() => papers
     .filter(paper => (level === '전체' || paper.meta.schoolLevel === level)
-      && (grade === '전체' || `${paper.meta.grade}학년` === grade)
       && (subject === '전체' || paper.meta.subject === subject)
       && (examType === '전체' || paper.meta.examType === examType)
       && (includeDemo || !paper.isDemo))
-    .map(paper => ({ paper, runs: runs.filter(run => run.paperId === paper.id && (includeDemo || !run.isDemo)) }))
-    .filter(entry => entry.runs.length > 0), [papers, runs, level, grade, subject, examType, includeDemo])
+    .map(paper => {
+      const paperRuns = runs.filter(run => run.paperId === paper.id)
+      const verify = validateStored(paper, paperRuns)
+      const latest = [...paperRuns].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]
+      return { paper, verify, latest: latest ? { run: latest, ...gradeRun(paper, latest) } : null, runCount: paperRuns.length }
+    }), [papers, runs, level, subject, examType, includeDemo])
 
-  const board = useMemo(() => modelLeaderboard(entries), [entries])
-  const subjects = useMemo(() => [...new Set(entries.map(entry => entry.paper.meta.subject))], [entries])
-  const runCount = entries.reduce((sum, entry) => sum + entry.runs.length, 0)
-  const overall = board.length ? board.reduce((sum, row) => sum + row.avgRate * row.papers, 0) / runCount : null
+  const shown = entries.filter(entry => status === '전체' || STATUS_TEXT[entry.verify.status] === status)
+  const passed = entries.filter(entry => entry.verify.status === 'ok').length
+  const withErrors = entries.filter(entry => entry.verify.status === 'error').length
+  const solved = entries.filter(entry => entry.latest)
+  const avgRate = solved.length ? solved.reduce((sum, entry) => sum + entry.latest.rate, 0) / solved.length : null
 
-  /** @brief 모델별 문항 유형 득점률 */
-  const typeRows = useMemo(() => {
+  // 항목별 오류·확인 건수
+  const byCheck = useMemo(() => {
     const map = new Map()
-    for (const { paper, runs: paperRuns } of entries) {
-      for (const run of paperRuns) {
-        const result = gradeRun(paper, run)
-        if (!map.has(run.model)) map.set(run.model, {})
-        const row = map.get(run.model)
-        for (const [type, value] of Object.entries(result.byType)) {
-          row[type] ??= { earned: 0, max: 0 }
-          row[type].earned += value.earned
-          row[type].max += value.max
-        }
+    for (const entry of entries) {
+      for (const check of entry.verify.checks) {
+        if (check.id === 'notes') continue
+        const row = map.get(check.id) ?? { name: `${check.letter}. ${check.title}`, error: 0, warn: 0 }
+        for (const item of check.items) if (item.level === 'error' || item.level === 'warn') row[item.level] += 1
+        map.set(check.id, row)
       }
     }
-    return board.map(({ model }) => ({ model, ...Object.fromEntries(Object.entries(map.get(model) || {}).map(([type, value]) => [type, value.max ? value.earned / value.max : null])) }))
-  }, [entries, board])
-
-  /** @brief 학년별 평균 득점률 */
-  const gradeRows = useMemo(() => {
-    const map = new Map()
-    for (const { paper, runs: paperRuns } of entries) {
-      const key = `${SCHOOL_SHORT[paper.meta.schoolLevel] ?? '중'}${paper.meta.grade}`
-      const order = SCHOOL_LEVELS.indexOf(paper.meta.schoolLevel) * 10 + paper.meta.grade
-      if (!map.has(key)) map.set(key, { key, order, rates: [] })
-      for (const run of paperRuns) map.get(key).rates.push(gradeRun(paper, run).rate)
-    }
-    return [...map.values()].sort((a, b) => a.order - b.order).map(row => ({ key: row.key, pct: Math.round(row.rates.reduce((s, r) => s + r, 0) / row.rates.length * 1000) / 10 }))
+    return [...map.values()]
   }, [entries])
 
-  const recent = useMemo(() => entries
-    .flatMap(({ paper, runs: paperRuns }) => paperRuns.map(run => ({ paper, run, result: gradeRun(paper, run) })))
-    .sort((a, b) => b.run.createdAt.localeCompare(a.run.createdAt))
-    .slice(0, 6), [entries])
-
-  const gradeOptions = level === '전체' ? ['전체', ...new Set(Object.values(GRADES).flat().sort((a, b) => a - b).map(value => `${value}학년`))] : ['전체', ...GRADES[level].map(value => `${value}학년`)]
-  const subjectOptions = ['전체', ...(level === '전체' ? [...new Set(Object.values(SUBJECTS).flat())] : SUBJECTS[level])]
-  const chartData = board.map((row, index) => ({ model: row.model, pct: Math.round(row.avgRate * 1000) / 10, color: PALETTE[index % PALETTE.length] }))
+  const subjects = level === '전체' ? [...new Set(Object.values(SUBJECTS).flat())] : SUBJECTS[level]
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">평가 결과 대시보드</h1>
-          <p className="mt-1 text-[var(--color-ink-soft)]">평가지 여러 개에 걸친 AI 모델 성적을 한눈에 비교합니다.</p>
-        </div>
-        <label className="flex items-center gap-2 text-sm font-semibold">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">검증 현황</h1>
+        <p className="mt-1 text-[var(--color-ink-soft)] break-keep">평가지마다 문제지·정답 검증 결과와 AI 채점 결과를 모아 봅니다. 평가지를 누르면 검증 화면으로 갑니다.</p>
+      </div>
+
+      <div className="card p-4 flex flex-wrap items-end gap-3">
+        <Select label="학교급" value={level} options={['전체', ...SCHOOL_LEVELS]} onChange={value => { setLevel(value); setSubject('전체') }} />
+        <Select label="과목" value={subject} options={['전체', ...subjects]} onChange={setSubject} />
+        <Select label="시험 종류" value={examType} options={['전체', ...EXAM_TYPES]} onChange={setExamType} />
+        <Select label="검증 결과" value={status} options={['전체', '오류 있음', '확인 필요', '통과']} onChange={setStatus} />
+        <label className="flex items-center gap-2 pb-2.5 text-sm font-semibold">
           <input type="checkbox" checked={includeDemo} onChange={e => setIncludeDemo(e.target.checked)} />
-          예시(가상) 데이터 포함
+          예시 데이터 포함
         </label>
       </div>
 
-      <div className="card p-4 flex flex-wrap gap-3">
-        <Select label="학교급" value={level} options={['전체', ...SCHOOL_LEVELS]} onChange={value => { setLevel(value); setGrade('전체'); setSubject('전체') }} />
-        <Select label="학년" value={grade} options={gradeOptions} onChange={setGrade} />
-        <Select label="과목" value={subject} options={subjectOptions} onChange={setSubject} />
-        <Select label="시험 종류" value={examType} options={['전체', ...EXAM_TYPES]} onChange={setExamType} />
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <Kpi label="평가지" value={entries.length} sub={`AI 풀이 ${solved.length}개`} />
+        <Kpi label="검증 통과" value={passed} sub={entries.length ? `${Math.round((passed / entries.length) * 100)}%` : '—'} tone="text-emerald-800" />
+        <Kpi label="오류 있는 평가지" value={withErrors} sub="고친 뒤 다시 검증하세요" tone={withErrors ? 'text-[var(--color-pen)]' : ''} />
+        <Kpi label="AI 평균 득점률" value={avgRate == null ? '—' : formatRate(avgRate)} sub="평가지별 최근 풀이 기준" />
       </div>
 
       {entries.length === 0 ? (
-        <div className="card px-6 py-16 text-center">
-          <p className="text-lg font-extrabold">표시할 결과가 없습니다</p>
-          <p className="mt-1 text-[var(--color-ink-soft)]">평가지에서 AI 풀이를 실행하거나 필터를 바꿔 보세요.{!includeDemo && papers.some(paper => paper.isDemo) && ' 예시 데이터를 포함하면 둘러볼 수 있습니다.'}</p>
-          <a href="#/" className="btn btn-primary mt-5">평가지로 가기</a>
+        <div className="card px-6 py-14 text-center">
+          <p className="text-lg font-extrabold">조건에 맞는 평가지가 없습니다</p>
+          <a href="#/new" className="btn btn-primary mt-5">문제지 검증 시작</a>
         </div>
       ) : (
         <>
-          <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-            <Kpi label="평가지" value={entries.length} sub={`${subjects.length}개 과목`} />
-            <Kpi label="풀이 기록" value={runCount} />
-            <Kpi label="평가한 모델" value={board.length} />
-            <Kpi label="1위 모델" value={formatRate(board[0]?.avgRate)} sub={board[0]?.model} />
-          </div>
-
-          <div className="grid gap-6 grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-            <div className="card p-4 sm:p-6">
-              <h2 className="text-lg font-extrabold">모델 순위 <span className="text-sm font-semibold text-[var(--color-ink-soft)]">평균 득점률</span></h2>
-              <p className="text-xs text-[var(--color-ink-soft)]">전체 평균 {formatRate(overall)}</p>
-              <div style={{ height: Math.max(180, chartData.length * 44) }} className="mt-3">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 48, left: 0, bottom: 0 }}>
-                    <CartesianGrid horizontal={false} stroke="#ece7db" />
-                    <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis type="category" dataKey="model" width={110} tick={{ fontSize: 12, fontWeight: 600 }} tickLine={false} axisLine={false} />
-                    <Tooltip formatter={value => [`${value}%`, '평균 득점률']} />
-                    <Bar dataKey="pct" radius={[0, 6, 6, 0]} barSize={22}>
-                      {chartData.map(row => <Cell key={row.model} fill={row.color} />)}
-                      <LabelList dataKey="pct" position="right" formatter={value => `${value}%`} style={{ fontSize: 12, fontWeight: 700, fill: '#1f2a44' }} />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            <div className="card p-4 sm:p-6">
-              <h2 className="text-lg font-extrabold mb-3">순위표</h2>
-              <div className="scroll-x">
-                <table className="w-full min-w-[340px] text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-[var(--color-ink-soft)] border-b border-[var(--color-line)]">
-                      <th className="py-2 pr-2">#</th>
-                      <th className="py-2 pr-2">모델</th>
-                      <th className="py-2 pr-2 text-right">평균</th>
-                      <th className="py-2 pr-2 text-right">최고</th>
-                      <th className="py-2 text-right">최저</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {board.map((row, index) => (
-                      <tr key={row.model} className="border-b border-[var(--color-line)]/60 last:border-0">
-                        <td className="py-2 pr-2 font-extrabold">{index + 1}</td>
-                        <td className="py-2 pr-2">
-                          <span className="font-bold">{row.model}</span>
-                          <span className="block text-xs text-[var(--color-ink-soft)]">평가지 {row.papers}개{row.isDemo ? ' · 가상' : ''}</span>
-                        </td>
-                        <td className="py-2 pr-2 text-right font-extrabold tabular-nums">{formatRate(row.avgRate)}</td>
-                        <td className="py-2 pr-2 text-right tabular-nums text-xs">{formatRate(row.best)}</td>
-                        <td className="py-2 text-right tabular-nums text-xs">{formatRate(row.worst)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div className="card p-4 sm:p-6">
-            <h2 className="text-lg font-extrabold">과목별 득점률</h2>
-            <p className="mb-3 text-xs text-[var(--color-ink-soft)]">초록에 가까울수록 높고, 빨강에 가까울수록 낮습니다.</p>
-            <div className="scroll-x">
-              <table className="w-full text-sm border-separate border-spacing-1" style={{ minWidth: 160 + subjects.length * 84 }}>
+          <section className="card p-4 sm:p-6">
+            <h2 className="text-lg font-extrabold">평가지별 검증 결과</h2>
+            <div className="mt-3 scroll-x">
+              <table className="w-full min-w-[680px] text-sm">
                 <thead>
-                  <tr>
-                    <th className="text-left text-xs text-[var(--color-ink-soft)] font-semibold px-2">모델</th>
-                    {subjects.map(name => <th key={name} className="text-xs text-[var(--color-ink-soft)] font-semibold px-2">{name}</th>)}
+                  <tr className="text-left text-xs text-[var(--color-ink-soft)] border-b border-[var(--color-line)]">
+                    <th className="py-2 pr-2 font-semibold">평가지</th>
+                    <th className="py-2 pr-2 font-semibold">검증</th>
+                    <th className="py-2 pr-2 font-semibold text-right">{LEVEL_LABEL.error}</th>
+                    <th className="py-2 pr-2 font-semibold text-right">{LEVEL_LABEL.warn}</th>
+                    <th className="py-2 pr-2 font-semibold">문제지 대조</th>
+                    <th className="py-2 pr-2 font-semibold text-right">최근 AI 풀이</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {board.map(row => (
-                    <tr key={row.model}>
-                      <td className="px-2 py-1 font-bold whitespace-nowrap">{row.model}</td>
-                      {subjects.map(name => (
-                        <td key={name} className="rounded-lg px-2 py-2.5 text-center font-bold tabular-nums" style={{ background: heatColor(row.bySubject[name]) }}>
-                          {formatRate(row.bySubject[name])}
-                        </td>
-                      ))}
+                  {shown.map(({ paper, verify, latest, runCount }) => (
+                    <tr key={paper.id} className="border-b border-[var(--color-line)]/70 last:border-0">
+                      <td className="py-2.5 pr-2">
+                        <a href={`#/paper/${paper.id}?tab=check`} className="font-bold hover:underline break-keep">{paperTitle(paper)}</a>
+                        <div className="text-xs text-[var(--color-ink-soft)]">{SCHOOL_SHORT[paper.meta.schoolLevel]}{paper.meta.grade} · {paper.questions.length}문항{paper.isDemo ? ' · 예시' : ''}</div>
+                      </td>
+                      <td className="py-2.5 pr-2"><span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-extrabold ${STATUS_STYLE[verify.status]}`}>{STATUS_TEXT[verify.status]}</span></td>
+                      <td className={`py-2.5 pr-2 text-right tabular-nums font-bold ${verify.counts.error ? 'text-[var(--color-pen)]' : 'text-[var(--color-ink-soft)]'}`}>{verify.counts.error}</td>
+                      <td className={`py-2.5 pr-2 text-right tabular-nums font-bold ${verify.counts.warn ? 'text-amber-800' : 'text-[var(--color-ink-soft)]'}`}>{verify.counts.warn}</td>
+                      <td className="py-2.5 pr-2 text-xs text-[var(--color-ink-soft)]">{verify.factsSource === 'ai' ? 'AI 정밀 검증' : verify.factsSource === 'pdf+ai' ? 'PDF + AI' : verify.factsSource === 'pdf' ? 'PDF 글자' : '정답·배점만'}</td>
+                      <td className="py-2.5 pr-2 text-right tabular-nums">
+                        {latest ? <><b>{latest.score}</b><span className="text-[var(--color-ink-soft)]">/{latest.maxScore}</span><div className="text-xs text-[var(--color-ink-soft)]">{latest.run.model} · {runCount}건</div></> : <span className="text-xs text-[var(--color-ink-soft)]">풀이 전</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {shown.length === 0 && <p className="py-6 text-center text-sm text-[var(--color-ink-soft)]">이 검증 결과의 평가지가 없습니다.</p>}
             </div>
-          </div>
+          </section>
 
-          <div className="grid gap-6 grid-cols-[minmax(0,1fr)] lg:grid-cols-2">
-            <div className="card p-4 sm:p-6">
-              <h2 className="text-lg font-extrabold">문항 유형별 득점률</h2>
-              <p className="mb-3 text-xs text-[var(--color-ink-soft)]">서술형은 수동 채점한 점수만 반영됩니다.</p>
-              <div className="scroll-x">
-                <table className="w-full min-w-[320px] text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-[var(--color-ink-soft)] border-b border-[var(--color-line)]">
-                      <th className="py-2 pr-2">모델</th>
-                      {Object.entries(QUESTION_TYPES).map(([type, label]) => <th key={type} className="py-2 pr-2 text-right">{label}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {typeRows.map(row => (
-                      <tr key={row.model} className="border-b border-[var(--color-line)]/60 last:border-0">
-                        <td className="py-2 pr-2 font-bold">{row.model}</td>
-                        {Object.keys(QUESTION_TYPES).map(type => (
-                          <td key={type} className="py-2 pr-2 text-right tabular-nums">
-                            {row[type] == null ? <span className="text-[var(--color-ink-soft)]">—</span> : formatRate(row[type])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          <section className="card p-4 sm:p-6">
+            <h2 className="text-lg font-extrabold">항목별 발견 건수</h2>
+            <p className="mb-3 text-xs text-[var(--color-ink-soft)]">어떤 검증 항목에서 오류가 자주 나오는지 봅니다.</p>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={byCheck} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
+                  <CartesianGrid horizontal={false} stroke="#ece7db" />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} />
+                  <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="error" name="오류" stackId="a" fill="var(--color-pen)" />
+                  <Bar dataKey="warn" name="확인 필요" stackId="a" fill="var(--color-accent)" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-
-            <div className="card p-4 sm:p-6">
-              <h2 className="text-lg font-extrabold">학년별 평균 득점률</h2>
-              <p className="mb-3 text-xs text-[var(--color-ink-soft)]">모든 모델의 풀이를 합친 평균</p>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={gradeRows} margin={{ top: 18, right: 8, left: -24, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke="#ece7db" />
-                    <XAxis dataKey="key" tick={{ fontSize: 12, fontWeight: 600 }} tickLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <Tooltip formatter={value => [`${value}%`, '평균 득점률']} />
-                    <Bar dataKey="pct" fill="var(--color-brand)" radius={[6, 6, 0, 0]} barSize={36}>
-                      <LabelList dataKey="pct" position="top" formatter={value => `${value}%`} style={{ fontSize: 11, fontWeight: 700, fill: '#1f2a44' }} />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-
-          <div className="card p-4 sm:p-6">
-            <h2 className="text-lg font-extrabold mb-3">최근 풀이</h2>
-            <ul className="divide-y divide-[var(--color-line)]">
-              {recent.map(({ paper, run, result }) => (
-                <li key={run.id}>
-                  <a href={`#/paper/${paper.id}?tab=omr&run=${run.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 hover:bg-white/60 rounded-lg px-2 -mx-2">
-                    <span className="font-bold">{run.model}</span>
-                    <span className="text-sm text-[var(--color-ink-soft)] truncate flex-1 min-w-[10rem]">{paperTitle(paper)}</span>
-                    <span className="font-hand text-2xl text-[var(--color-pen)] leading-none">{result.score}점</span>
-                    <span className="text-xs text-[var(--color-ink-soft)] tabular-nums">{formatRate(result.rate)}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
+          </section>
         </>
       )}
     </div>

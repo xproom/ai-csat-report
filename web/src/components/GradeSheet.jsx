@@ -119,7 +119,7 @@ export default function GradeSheet({ paper, run, result, onReplay, onClose }) {
 
       <div className="flex flex-wrap justify-center gap-2">
         <button type="button" className="btn btn-primary" onClick={onReplay}>↺ 처음부터 다시 보기</button>
-        <a className="btn btn-ghost" href={`#/paper/${paper.id}?tab=perf`}>성능 평가 보기</a>
+        <a className="btn btn-ghost" href={`#/paper/${paper.id}?tab=check`}>정답 검증 보기</a>
         {onClose && <button type="button" className="btn btn-ghost" onClick={onClose}>답안지 보기</button>}
       </div>
     </div>

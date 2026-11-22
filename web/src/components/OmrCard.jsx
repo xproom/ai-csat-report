@@ -10,7 +10,7 @@
  */
 
 import { useMemo } from 'react'
-import { gradeRun } from '@/lib/grading'
+import { choiceList, gradeRun } from '@/lib/grading'
 import { paperTitle } from '@/lib/schema'
 
 const ROWS_PER_COLUMN = 10
@@ -158,7 +158,7 @@ export default function OmrCard({ paper, run = null, showGrading = true, editabl
                                     key={digit}
                                     digit={digit}
                                     filled={marked === digit}
-                                    isKey={showKey && String(question.answer) === digit}
+                                    isKey={showKey && choiceList(question.answer).includes(Number(digit))}
                                     disabled={!editable}
                                     label={`${question.no}번 ${digit}번 선지${marked === digit ? ' (마킹됨)' : ''}`}
                                     onClick={() => onAnswer?.(question.no, marked === digit ? '' : digit)}

@@ -46,6 +46,9 @@ jobs:
         env:
           # 저장소 이름 경로로 배포 (https://<user>.github.io/<repo>/)
           VITE_BASE: /${{ github.event.repository.name }}/
+          # 중앙 서버(Supabase) 연결: 저장소 Settings → Secrets and variables → Actions → Variables에 넣으면 사이트에 연결됨 (없으면 설정 화면에서 입력)
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
         run: npm test && npm run build
 
       - name: Upload GitHub Pages artifact
