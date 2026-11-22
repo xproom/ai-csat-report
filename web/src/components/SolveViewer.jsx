@@ -117,6 +117,22 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   }, [focusNo, replay, live, run])
   const display = focusView ?? view
 
+  // 풀이가 적힌 문제지 PDF 내려받기 (진행 표시 "3/20쪽")
+  const [pdfProgress, setPdfProgress] = useState('')
+  const downloadPdf = async () => {
+    if (!run) return
+    setPdfProgress('0쪽')
+    try {
+      const { downloadSolutionPdf } = await import('@/lib/solutionPdf')
+      const result = await downloadSolutionPdf({ paper, run, file: files[0], onProgress: (done, count) => setPdfProgress(`${done}/${count}쪽`) })
+      notify(`풀이 PDF를 내려받았습니다 (${result.pages}쪽, 풀이 ${result.annotated}문항).`)
+    } catch (error) {
+      notify(error?.message || '풀이 PDF를 만들지 못했습니다.', 'error')
+    } finally {
+      setPdfProgress('')
+    }
+  }
+
   // PDF 글자 위치로 만든 문항 색인 (문제지가 PDF 한 개일 때). 없으면 null → 아래 상자에 풀이 표시
   const [questionIndex, setQuestionIndex] = useState(null)
   const stageRef = useRef(null)
@@ -271,6 +287,11 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
                 {playing ? '⏸ 일시정지' : done ? '↺ 다시 재생' : clock ? '▶ 이어서' : '▶ 재생'}
               </button>
               <button type="button" className="btn btn-ghost" onClick={() => { setPlaying(false); setFocusNo(null); setShowSheet(true); setClock(total) }}>채점 결과로</button>
+              {questionIndex && (
+                <button type="button" className="btn btn-ghost" disabled={Boolean(pdfProgress)} onClick={downloadPdf} title="AI 풀이 과정이 문제 아래 점선 상자에 적힌 문제지를 PDF로 내려받습니다">
+                  {pdfProgress ? `PDF 만드는 중… ${pdfProgress}` : '⤓ 풀이 PDF 내려받기'}
+                </button>
+              )}
               <div className="segmented ml-auto" role="group" aria-label="재생 속도">
                 {SPEEDS.map(value => (
                   <button key={value} type="button" aria-pressed={speed === value} onClick={() => setSpeed(value)}>{value === 1 ? '실제 속도' : `${value}×`}</button>

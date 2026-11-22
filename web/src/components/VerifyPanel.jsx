@@ -257,6 +257,13 @@ export default function VerifyPanel({ paper, files, runs = [], onChange, onEditQ
               <LevelBadge level={reading ? 'info' : check.status}>{reading ? '준비' : CHECK_LABEL[check.status]}</LevelBadge>
             </div>
             <ul className="mt-3 space-y-1.5">
+              {check.id === 'points' && facts && check.items.some(item => item.no && item.level !== 'ok') && (
+                <li>
+                  <button type="button" className="btn btn-ghost !py-1.5 text-sm" onClick={() => onChange(prev => applyPrintedPoints(prev, mergeFacts(prev.verification?.pdf ?? null, prev.verification?.ai ?? null), { force: true }) ?? prev)}>
+                    문제지 [N점] 표시대로 배점 고치기
+                  </button>
+                </li>
+              )}
               {check.items.map((item, index) => (
                 <li key={index} className="flex items-start gap-2 text-sm leading-relaxed">
                   <span className={`mt-[3px] shrink-0 flex w-4 h-4 items-center justify-center rounded-full text-[0.6rem] font-black text-white ${LEVEL_STYLE[item.level].dot}`} aria-label={LEVEL_LABEL[item.level]}>{LEVEL_STYLE[item.level].icon}</span>

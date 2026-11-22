@@ -57,7 +57,8 @@ export function blankRegion(items, anchors, anchor) {
   const footerTops = items.filter(item => item.top > 0.9).map(item => item.top)
   const pageBottom = Math.min(0.95, footerTops.length ? Math.min(...footerTops) - 0.01 : 0.95)
   const nextTop = below.length ? below[0].top : pageBottom
-  const inQuestion = colItems.filter(item => item.top >= anchor.top - 0.005 && item.top < nextTop - 0.005)
+  // 다음 문제 줄에 붙은 글자(수식 기호가 줄보다 조금 위에 놓인 경우 등)는 이 문제 글로 보지 않음
+  const inQuestion = colItems.filter(item => item.top >= anchor.top - 0.005 && item.top < nextTop - 0.015)
   const contentBottom = inQuestion.length ? Math.max(...inQuestion.map(item => item.bottom)) : anchor.top + 0.03
   let top = contentBottom + 0.008
   const bottom = nextTop - 0.008
@@ -117,7 +118,9 @@ export async function buildQuestionIndex(file, paper) {
     const forms = assignPageForms(allPages)
     const both = forms.includes('홀수형') && forms.includes('짝수형')
     const pages = both && form ? allPages.filter((_, i) => forms[i] === form) : allPages
-    // 문항 번호마다 나온 자리 (홀수형·짝수형이나 선택과목처럼 여러 번 나올 수 있음)
+    // 지문 속 "1. 2." 목록처럼 문항 순서를 거스르는 번호는 문항 번호에서 뺌 (검증과 같은 규칙)
+    filterAnchorSequence(pages, paper)
+    // 문항 번호마다 나온 자리 (선택과목처럼 여러 번 나올 수 있음)
     const occurrences = new Map()
     for (const page of pages) {
       for (const anchor of page.anchors) {
@@ -125,14 +128,12 @@ export async function buildQuestionIndex(file, paper) {
         occurrences.get(anchor.no).push({ page, anchor })
       }
     }
-    const elective = String(paper.meta?.elective ?? '').replace(/\s+/g, '')
+    const inElective = electivePageTest(pages.map(page => page.text), paper, pages.map(page => headerText(page.items)))
     const pick = no => {
       const list = occurrences.get(no) ?? []
       const question = paper.questions.find(item => item.no === no)
-      if (question?.elective && elective) {
-        // 선택과목 문항은 그 과목 이름이 나온 쪽(또는 그 뒤쪽)에서 찾음
-        const electiveStart = pages.find(page => page.text.includes(elective))?.pageNumber
-        const match = list.find(entry => electiveStart && entry.page.pageNumber >= electiveStart)
+      if (question?.elective && inElective) {
+        const match = list.find(entry => inElective(pages.indexOf(entry.page)))
         if (match) return match
       }
       return list[0] ?? null
@@ -147,7 +148,7 @@ export async function buildQuestionIndex(file, paper) {
       .map(question => ({ no: question.no, region: regionOf(question.no) }))
       .filter(item => item.region?.page === pageNumber)
       .map(item => ({ no: item.no, ...item.region }))
-    return { regionOf, regionsOnPage, pageCount: pdf.numPages, found: [...chosen.values()].filter(Boolean).length }
+    return { regionOf, regionsOnPage, pageCount: pdf.numPages, pageNumbers: pages.map(page => page.pageNumber), found: [...chosen.values()].filter(Boolean).length }
   })()
   indexCache.set(key, promise)
   promise.catch(() => indexCache.delete(key))
@@ -280,7 +281,7 @@ export async function extractPaperFacts(files, paper) {
       const no = anchorItems.get(item)
       const accepted = no != null && (no >= lastNo || (no === electiveFirst && lastNo >= electiveFirst))
       if (accepted) {
-        current = { no, index: page.index, parts: [] }
+        current = { no, index: page.index, pos: pages.indexOf(page), parts: [] }
         segments.push(current)
         lastNo = no
       }
@@ -288,12 +289,11 @@ export async function extractPaperFacts(files, paper) {
     }
   }
 
-  const elective = String(paper.meta?.elective ?? '').replace(/\s+/g, '')
-  const electiveStart = elective ? pages.find(page => page.compact.includes(elective))?.index : undefined
+  const inElective = electivePageTest(pages.map(page => page.compact), paper, pages.map(page => headerText(page.items)))
   const questions = {}
   for (const question of paper.questions) {
     const list = segments.filter(segment => segment.no === question.no)
-    const chosen = (question.elective && electiveStart ? list.find(segment => segment.index >= electiveStart) : null) ?? list[0]
+    const chosen = (question.elective && inElective ? list.find(segment => inElective(segment.pos)) : null) ?? list[0]
     if (!chosen) continue
     questions[question.no] = { index: chosen.index, ...analyzeQuestionText(chosen.parts.join(' ')) }
   }
@@ -314,8 +314,55 @@ export async function extractPaperFacts(files, paper) {
     // 검사한 쪽의 형 (한 파일에 두 형이 있으면 고른 형 쪽만 검사했으므로 그 형)
     formType: keptForms.length === 1 ? keptForms[0] : '',
     bothForms: oddFound && evenFound,
-    checkedPages: oddFound && evenFound ? `${pages[0].index}~${pages.at(-1).index}쪽` : '',
-    electiveStart: electiveStart ?? 0
+    checkedPages: oddFound && evenFound ? `${pages[0].index}~${pages.at(-1).index}쪽` : ''
+  }
+}
+
+/** @brief 쪽 위쪽 20%의 글자 (머리글) */
+function headerText(items) {
+  return items.filter(item => item.top < 0.2).map(item => item.str).join('').replace(/\s+/g, '')
+}
+
+/**
+ * @brief 선택과목 쪽인지 판별하는 함수 (선택과목을 고르지 않았거나 못 찾으면 null)
+ * - 평가원 문제지는 선택과목 쪽마다 머리글에 "(미적분)"처럼 과목 이름이 괄호로 들어감 → 그 쪽들
+ * - 앞 과목 마지막 쪽 아래에 "선택과목(미적분) 문제가 이어집니다" 같은 안내가 있으므로 머리글(위쪽)에서만 찾음
+ * - 괄호 머리글이 없으면 과목 이름이 처음 나온 쪽부터
+ * @param {string[]} texts - 쪽별 글자 (공백 없앰)
+ * @param {string[]} [headers] - 쪽별 머리글 글자
+ * @returns {((pageIndex: number) => boolean)|null}
+ */
+export function electivePageTest(texts, paper, headers = texts) {
+  const elective = String(paper.meta?.elective ?? '').replace(/\s+/g, '')
+  if (!elective) return null
+  const headed = headers.map((text, index) => (text.includes(`(${elective})`) ? index : -1)).filter(index => index >= 0)
+  if (headed.length) {
+    let best = [headed[0]]
+    let run = [headed[0]]
+    for (const index of headed.slice(1)) {
+      run = index === run.at(-1) + 1 ? [...run, index] : [index]
+      if (run.length > best.length) best = run
+    }
+    const section = new Set(best)
+    return index => section.has(index)
+  }
+  const start = texts.findIndex(text => text.includes(elective))
+  return start >= 0 ? index => index >= start : null
+}
+
+/**
+ * @brief 쪽마다 찾은 문항 번호 중 순서를 거스르는 번호(지문 속 "1. 2." 목록 등)를 뺌
+ * - 앞 문항 번호보다 작아지면 문항 번호가 아님. 선택과목 첫 번호(국어 35, 수학 23)로 돌아가는 것만 허용
+ */
+function filterAnchorSequence(pages, paper) {
+  const electiveFirst = Math.min(...paper.questions.filter(question => question.elective).map(question => question.no))
+  let lastNo = 0
+  for (const page of pages) {
+    page.anchors = page.anchors.filter(anchor => {
+      const accepted = anchor.no >= lastNo || (anchor.no === electiveFirst && lastNo >= electiveFirst)
+      if (accepted) lastNo = anchor.no
+      return accepted
+    })
   }
 }
 

@@ -36,12 +36,14 @@ export function targetTotal(paper) {
  *   그렇게 해서 총점이 맞을 때만 적용하고, 맞지 않으면 인쇄된 문항만 바꿈
  * @returns {Object|null} 바뀐 평가지 (바꿀 것이 없으면 null)
  */
-export function applyPrintedPoints(paper, facts) {
+export function applyPrintedPoints(paper, facts, { force = false } = {}) {
   const printed = new Map(Object.entries(facts?.questions ?? {}).filter(([, fact]) => fact.printedPoints > 0).map(([no, fact]) => [Number(no), fact.printedPoints]))
-  if (!printed.size || !paper.questions.some(question => question.pointsEstimated)) return null
+  // force: 교사가 「문제지 표시대로 배점 고치기」를 누른 경우 - 짐작값이 아닌 배점도 인쇄된 값으로 바꿈
+  const changeable = question => force || question.pointsEstimated
+  if (!printed.size || !paper.questions.some(changeable)) return null
   const unmarked = facts.defaultPoints || 2
   const pick = (question, fillUnmarked) => {
-    if (!question.pointsEstimated) return question.points
+    if (!changeable(question)) return question.points
     if (printed.has(question.no)) return printed.get(question.no)
     return fillUnmarked && facts.questions?.[question.no] ? unmarked : question.points
   }
@@ -51,7 +53,7 @@ export function applyPrintedPoints(paper, facts) {
   if (values.every((value, index) => value === paper.questions[index].points)) return null
   return {
     ...paper,
-    questions: paper.questions.map((question, index) => (question.pointsEstimated && values[index] !== question.points
+    questions: paper.questions.map((question, index) => (changeable(question) && values[index] !== question.points
       ? { ...question, points: values[index], pointsEstimated: false, pointsFromPaper: true }
       : question))
   }
@@ -91,7 +93,7 @@ function checkPoints(paper, facts) {
     if (!Number.isFinite(points) || points <= 0) items.push({ level: 'error', no: question.no, text: `${question.no}번 배점이 비어 있거나 0점입니다.` })
   }
   const fromPaper = paper.questions.filter(question => question.pointsFromPaper).length
-  if (fromPaper) items.push({ level: 'info', text: `표준 구성의 짐작 배점을 문제지의 [N점] 표시대로 맞췄습니다 (${fromPaper}문항).` })
+  if (fromPaper) items.push({ level: 'info', text: `배점을 문제지의 [N점] 표시대로 맞췄습니다 (${fromPaper}문항).` })
   const sum = roundPoints(paper.questions.reduce((total, question) => total + (Number(question.points) || 0), 0))
   if (sum === target) items.push({ level: 'ok', text: `배점 합계 ${fmt(sum)}점이 총점 ${fmt(target)}점과 일치합니다.` })
   else items.push({ level: 'error', text: `배점 합계 ${fmt(sum)}점이 총점 ${fmt(target)}점과 ${fmt(Math.abs(target - sum))}점 ${sum > target ? '많습니다' : '모자랍니다'}.` })
@@ -474,6 +476,13 @@ export function validatePaper(paper, { facts = null, runs = [] } = {}) {
 }
 
 /** @brief 저장된 검증 정보로 검증 (대시보드·목록용, 문제지를 다시 읽지 않음) */
+/** @brief 상태별 검증 항목 수 (화면 요약용 - 항목 안의 줄 수가 아니라 검증 항목 수) */
+export function checkCounts(result) {
+  const counts = { error: 0, warn: 0, ok: 0, info: 0 }
+  for (const check of result.checks) counts[check.status] += 1
+  return counts
+}
+
 export function validateStored(paper, runs = []) {
   return validatePaper(paper, { facts: mergeFacts(paper.verification?.pdf ?? null, paper.verification?.ai ?? null), runs })
 }

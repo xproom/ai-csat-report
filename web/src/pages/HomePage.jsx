@@ -10,7 +10,7 @@ import { loadDemo } from '@/lib/demo'
 import { gradeRun } from '@/lib/grading'
 import { EXAM_TYPES, SCHOOL_LEVELS, paperTitle } from '@/lib/schema'
 import { useStore } from '@/lib/store'
-import { validateStored } from '@/lib/verify'
+import { checkCounts, validateStored } from '@/lib/verify'
 
 const VERIFY_LABEL = {
   error: ['검증 오류', 'text-[var(--color-pen)]'],
@@ -131,7 +131,7 @@ export default function HomePage() {
                     <div className="font-bold text-sm leading-snug line-clamp-2 break-keep">{paperTitle(paper)}</div>
                     <div className="mt-1 text-xs text-[var(--color-ink-soft)]">
                       <b className={verifyTone}>{verifyLabel}</b>
-                      {summary.verify.status !== 'ok' && <span> {summary.verify.counts.error + summary.verify.counts.warn}건</span>}
+                      {summary.verify.status !== 'ok' && <span> {checkCounts(summary.verify).error + checkCounts(summary.verify).warn}개 항목</span>}
                       {' · '}
                       {summary.latest ? <>AI {summary.latest.score}/{summary.latest.maxScore}점</> : 'AI 풀이 전'}
                     </div>

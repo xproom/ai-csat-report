@@ -11,7 +11,7 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 import { formatRate, gradeRun } from '@/lib/grading'
 import { EXAM_TYPES, SCHOOL_LEVELS, SCHOOL_SHORT, SUBJECTS, paperTitle } from '@/lib/schema'
 import { useStore } from '@/lib/store'
-import { LEVEL_LABEL, validateStored } from '@/lib/verify'
+import { LEVEL_LABEL, checkCounts, validateStored } from '@/lib/verify'
 
 const STATUS_STYLE = {
   error: 'bg-red-50 text-[var(--color-pen)] border-red-200',
@@ -138,8 +138,8 @@ export default function DashboardPage() {
                         <div className="text-xs text-[var(--color-ink-soft)]">{SCHOOL_SHORT[paper.meta.schoolLevel]}{paper.meta.grade} · {paper.questions.length}문항{paper.isDemo ? ' · 예시' : ''}</div>
                       </td>
                       <td className="py-2.5 pr-2"><span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-extrabold ${STATUS_STYLE[verify.status]}`}>{STATUS_TEXT[verify.status]}</span></td>
-                      <td className={`py-2.5 pr-2 text-right tabular-nums font-bold ${verify.counts.error ? 'text-[var(--color-pen)]' : 'text-[var(--color-ink-soft)]'}`}>{verify.counts.error}</td>
-                      <td className={`py-2.5 pr-2 text-right tabular-nums font-bold ${verify.counts.warn ? 'text-amber-800' : 'text-[var(--color-ink-soft)]'}`}>{verify.counts.warn}</td>
+                      <td className={`py-2.5 pr-2 text-right tabular-nums font-bold ${checkCounts(verify).error ? 'text-[var(--color-pen)]' : 'text-[var(--color-ink-soft)]'}`}>{checkCounts(verify).error}</td>
+                      <td className={`py-2.5 pr-2 text-right tabular-nums font-bold ${checkCounts(verify).warn ? 'text-amber-800' : 'text-[var(--color-ink-soft)]'}`}>{checkCounts(verify).warn}</td>
                       <td className="py-2.5 pr-2 text-xs text-[var(--color-ink-soft)]">{verify.factsSource === 'ai' ? 'AI 정밀 검증' : verify.factsSource === 'pdf+ai' ? 'PDF + AI' : verify.factsSource === 'pdf' ? 'PDF 글자' : '정답·배점만'}</td>
                       <td className="py-2.5 pr-2 text-right tabular-nums">
                         {latest ? <><b>{latest.score}</b><span className="text-[var(--color-ink-soft)]">/{latest.maxScore}</span><div className="text-xs text-[var(--color-ink-soft)]">{latest.run.model} · {runCount}건</div></> : <span className="text-xs text-[var(--color-ink-soft)]">풀이 전</span>}

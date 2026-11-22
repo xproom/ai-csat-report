@@ -1,33 +1,45 @@
 /**
  * @file PageView.jsx
  * @brief 문제지 한 쪽 보기 (PDF는 pdf.js로 캔버스에 그리고, 사진은 그대로 표시)
- * - annotations가 있으면 각 문제 아래 빈칸에 AI 풀이 기록을 손글씨로 겹쳐 그림
+ * - annotations가 있으면 각 문제 아래 빈칸(점선 상자)에 AI 풀이 기록을 굴림체로 겹쳐 그림
  * - 지금 푸는 문제가 보이도록 문제지 영역(scrollRef) 안에서만 스크롤
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { MIN_FIT, NOTE_COLOR, NOTE_FONT, NOTE_LINE_HEIGHT, NOTE_SIZE, answerLabel } from '@/lib/noteStyle'
 import { renderPdfPage } from '@/lib/pdfRender'
 
-const CIRCLED = ['①', '②', '③', '④', '⑤']
-
-/** @brief 문제 아래 빈칸에 쓰는 풀이 기록 */
+/** @brief 문제 아래 빈칸에 쓰는 풀이 기록 - 굴림체, 점선 상자 (칸이 모자라면 글자를 줄여 맞춤) */
 function NoteBlock({ annotation }) {
   const { notes = [], active, x0, x1, top, bottom, type } = annotation
-  const showAnswer = text => (type === 'choice' ? CIRCLED[Number(String(text).match(/[0-9]+/)?.[0]) - 1] ?? text : text)
+  const boxRef = useRef(null)
+  const [fit, setFit] = useState(1)
+  const textKey = notes.map(note => note.visible).join('|')
+  // 글이 칸을 넘치면 넘친 비율만큼 줄임 (최소 MIN_FIT), 칸이 넉넉해지면 다시 키움
+  useLayoutEffect(() => {
+    const box = boxRef.current
+    if (!box) return
+    const overflow = box.scrollHeight / Math.max(1, box.clientHeight)
+    setFit(prev => {
+      const next = overflow > 1.01 ? prev / overflow : prev < 1 && overflow < 0.8 ? Math.min(1, prev / overflow * 0.95) : prev
+      return Math.max(MIN_FIT, Math.min(1, Number(next.toFixed(3))))
+    })
+  }, [textKey, fit])
   return (
     <div
-      className={`absolute overflow-hidden rounded-md px-[1.2cqw] py-[0.6cqw] transition-colors ${active ? 'border-2 border-dashed border-amber-400/80 bg-amber-50/60' : ''}`}
-      style={{ left: `${x0 * 100}%`, top: `${top * 100}%`, width: `${(x1 - x0) * 100}%`, height: `${(bottom - top) * 100}%` }}
+      ref={boxRef}
+      className={`absolute overflow-hidden rounded-md px-[1.2cqw] py-[0.6cqw] transition-colors border-2 border-dashed ${active ? 'border-amber-400/80 bg-amber-50/60' : 'border-amber-400/60 bg-white/40'}`}
+      style={{ left: `${x0 * 100}%`, top: `${top * 100}%`, width: `${(x1 - x0) * 100}%`, height: `${(bottom - top) * 100}%`, fontFamily: NOTE_FONT }}
       data-note-no={annotation.no}
     >
       {notes.map((note, index) => (
         <div
           key={index}
-          className={`font-hand break-words ${note.kind === 'answer' ? 'text-[var(--color-pen)]' : note.kind === 'step' ? 'text-slate-500' : 'text-[#1b2a6b]'}`}
-          style={{ fontSize: note.kind === 'answer' ? '2.7cqw' : note.kind === 'step' ? '1.7cqw' : '2.2cqw', lineHeight: 1.15 }}
+          className="break-words"
+          style={{ fontSize: `${((NOTE_SIZE[note.kind] ?? NOTE_SIZE.work) * fit * 100).toFixed(3)}cqw`, lineHeight: NOTE_LINE_HEIGHT, color: NOTE_COLOR[note.kind] ?? NOTE_COLOR.work, fontWeight: note.kind === 'answer' ? 700 : 400 }}
         >
-          {note.kind === 'answer' ? `답: ${showAnswer(note.visible)}` : note.visible}
-          {note.writing && <span className="ml-0.5 inline-block w-[2px] animate-pulse bg-[#1b2a6b] align-middle" style={{ height: '2cqw' }} />}
+          {note.kind === 'answer' ? answerLabel(type, note.visible) : note.visible}
+          {note.writing && <span className="ml-0.5 inline-block w-[2px] animate-pulse align-middle" style={{ height: '1em', background: NOTE_COLOR.work }} />}
         </div>
       ))}
     </div>
