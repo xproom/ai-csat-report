@@ -52,10 +52,11 @@ export async function filesToImages(files, paper) {
  * @brief 등록한 LLM으로 평가지 풀이
  * @returns {Promise<Object>} 풀이 기록(Run)
  */
-export async function runLlmOnPaper({ providerId, apiKey, model, paper, files, signal }) {
+export async function runLlmOnPaper({ providerId, apiKey, model, paper, files, signal, shared = {} }) {
   if (!apiKey) throw new Error(`${providerOf(providerId)?.label ?? ''} API 키를 먼저 입력하세요.`)
   if (!files?.length) throw new Error('문제지 파일이 없습니다. 먼저 문제지를 업로드하세요.')
-  const images = await filesToImages(files, paper)
+  shared.images ??= filesToImages(files, paper)
+  const images = await shared.images
   signal?.throwIfAborted()
   const started = performance.now()
   const result = await askProvider(providerId, apiKey, {

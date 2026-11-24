@@ -14,7 +14,6 @@
  * trace 이벤트: { t: 시작부터 ms, no, kind: 'start'|'page'|'think'|'step'|'work'|'answer'|'end', text }
  */
 
-import Anthropic from '@anthropic-ai/sdk'
 import { blobToBase64 } from './db.js'
 import { normalizeChoice } from './grading.js'
 import { makeId, QUESTION_TYPES } from './schema.js'
@@ -364,6 +363,7 @@ export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, fi
   }
 
   const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
+  const { default: Anthropic } = await import('@anthropic-ai/sdk')
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
   const blocks = await buildCachedBlocks(files)
 

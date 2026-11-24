@@ -7,7 +7,7 @@
  * - graded이면 문항마다 실제 정답과 비교한 ○/✕ 표시
  */
 
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { choiceList } from '@/lib/grading'
 
 /** @brief 0~999 정수 답이면 세 자리 문자열 배열 */
@@ -39,7 +39,7 @@ function GradeMark({ correct }) {
  * @param {number|null} props.currentNo
  * @param {Map<number, Object>|null} props.gradedItems - 채점 결과 (문항 번호 → gradeRun item)
  */
-export default function CompactOmr({ paper, answers, currentNo, gradedItems = null, title = '답안지', onSelect = null }) {
+function CompactOmr({ paper, answers, currentNo, gradedItems = null, title = '답안지', onSelect = null }) {
   const listRef = useRef(null)
   const marked = paper.questions.filter(question => answers[question.no]).length
 
@@ -111,3 +111,6 @@ export default function CompactOmr({ paper, answers, currentNo, gradedItems = nu
     </div>
   )
 }
+
+// 재생 시계가 움직일 때마다가 아니라, 답·현재 문항이 바뀔 때만 다시 그림
+export default memo(CompactOmr)

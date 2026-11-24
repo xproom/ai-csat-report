@@ -9,10 +9,13 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { blobToDataUrl } from './db.js'
+import { backupBlob } from './files.js'
 import { authErrorMessage } from './password.js'
 
 const CONFIG_KEY = 'exam-bench.supabase'
 const BUCKET = 'paper-files'
+const PAGE_ROWS = 500
 
 function safe(action, fallback = null) {
   try { return action() } catch { return fallback }
@@ -239,6 +242,27 @@ export const setGuest = on => safe(() => (on ? sessionStorage.setItem(GUEST_KEY,
 export function createCloudDb(supabase, userId) {
   // 문제지 파일은 한 번 내려받으면 이 탭에서 다시 쓰기 (PDF 보기·AI 풀이마다 다시 받지 않음)
   const blobCache = new Map()
+  const downloads = new Map()
+  // 서버에 있는 것으로 확인된 평가지·파일 (저장할 때마다 다시 묻지 않음)
+  const knownPapers = new Set()
+  const knownFiles = new Map()
+  // 같은 평가지·풀이를 연달아 저장할 때 순서가 뒤바뀌어 옛 내용이 남지 않게 차례대로 보냄
+  const queues = new Map()
+  const inOrder = (key, job) => {
+    const next = (queues.get(key) ?? Promise.resolve()).catch(() => {}).then(job)
+    queues.set(key, next)
+    next.catch(() => {}).then(() => { if (queues.get(key) === next) queues.delete(key) })
+    return next
+  }
+  // 서버는 한 번에 1000행까지만 주므로 나누어 모두 읽음
+  const readAll = async makeQuery => {
+    const rows = []
+    for (;;) {
+      const part = check(await makeQuery().range(rows.length, rows.length + PAGE_ROWS - 1))
+      rows.push(...part)
+      if (part.length < PAGE_ROWS) return rows
+    }
+  }
   const pathOf = (paperId, fileId) => `${userId}/${paperId}/${fileId}`
 
   const api = {
@@ -246,9 +270,11 @@ export function createCloudDb(supabase, userId) {
     userId,
 
     async listPapers() {
-      const rows = check(await supabase.from('papers').select('data').order('updated_at', { ascending: false }))
+      const rows = await readAll(() => supabase.from('papers').select('data').order('updated_at', { ascending: false }).order('id'))
       // 파일을 먼저 올리느라 만든 빈 평가지 행(pending)은 목록에서 뺌
-      return rows.map(row => row.data).filter(paper => !paper.pending)
+      const papers = rows.map(row => row.data).filter(paper => paper?.id && !paper.pending)
+      for (const paper of papers) knownPapers.add(paper.id)
+      return papers
     },
     async getPaper(id) {
       const row = check(await supabase.from('papers').select('data').eq('id', id).maybeSingle())
@@ -256,11 +282,20 @@ export function createCloudDb(supabase, userId) {
     },
     async savePaper(paper) {
       const next = { ...paper, updatedAt: new Date().toISOString() }
-      check(await supabase.from('papers').upsert({ id: next.id, owner_id: userId, data: next, updated_at: next.updatedAt }))
-      return next
+      return inOrder(`paper:${next.id}`, async () => {
+        check(await supabase.from('papers').upsert({ id: next.id, owner_id: userId, data: next, updated_at: next.updatedAt }))
+        knownPapers.add(next.id)
+        return next
+      })
     },
     async deletePaper(id) {
-      const files = check(await supabase.from('paper_files').select('storage_path').eq('paper_id', id))
+      await queues.get(`paper:${id}`)?.catch(() => {})
+      knownPapers.delete(id)
+      const files = check(await supabase.from('paper_files').select('id, storage_path').eq('paper_id', id))
+      for (const file of files) {
+        knownFiles.delete(file.id)
+        blobCache.delete(file.id)
+      }
       if (files.length) check(await supabase.storage.from(BUCKET).remove(files.map(file => file.storage_path)))
       // 풀이 기록·파일 목록은 외래 키(on delete cascade)로 함께 지워짐
       check(await supabase.from('papers').delete().eq('id', id))
@@ -269,18 +304,24 @@ export function createCloudDb(supabase, userId) {
     async listFiles(paperId) {
       const rows = check(await supabase.from('paper_files').select('*').eq('paper_id', paperId).order('ord'))
       return Promise.all(rows.map(async row => {
-        let blob = blobCache.get(row.id)
-        if (!blob) {
-          blob = check(await supabase.storage.from(BUCKET).download(row.storage_path))
-          blobCache.set(row.id, blob)
+        knownFiles.set(row.id, row.ord)
+        // 같은 파일을 동시에 두 번 내려받지 않음
+        if (!blobCache.has(row.id) && !downloads.has(row.id)) {
+          downloads.set(row.id, supabase.storage.from(BUCKET).download(row.storage_path)
+            .then(result => blobCache.set(row.id, check(result)))
+            .finally(() => downloads.delete(row.id)))
         }
+        await downloads.get(row.id)
+        const blob = blobCache.get(row.id)
         return { id: row.id, paperId: row.paper_id, name: row.name, type: row.type, size: row.size, order: row.ord, blob }
       }))
     },
     async saveFile(record) {
       const storagePath = pathOf(record.paperId, record.id)
-      // 이미 올린 파일(순서만 바뀜)은 다시 올리지 않음
-      const existing = check(await supabase.from('paper_files').select('id').eq('id', record.id).maybeSingle())
+      const order = record.order ?? 0
+      // 이미 올린 파일이면 다시 올리지 않고, 순서까지 같으면 아무것도 보내지 않음
+      if (knownFiles.get(record.id) === order) return record
+      const existing = knownFiles.has(record.id) || check(await supabase.from('paper_files').select('id').eq('id', record.id).maybeSingle())
       if (!existing) {
         check(await supabase.storage.from(BUCKET).upload(storagePath, record.blob, { contentType: record.type || 'application/octet-stream', upsert: true }))
       }
@@ -293,9 +334,10 @@ export function createCloudDb(supabase, userId) {
         name: record.name,
         type: record.type,
         size: record.size ?? record.blob?.size ?? 0,
-        ord: record.order ?? 0,
+        ord: order,
         storage_path: storagePath
       }))
+      knownFiles.set(record.id, order)
       return record
     },
     async deleteFile(id) {
@@ -303,17 +345,30 @@ export function createCloudDb(supabase, userId) {
       if (row) check(await supabase.storage.from(BUCKET).remove([row.storage_path]))
       check(await supabase.from('paper_files').delete().eq('id', id))
       blobCache.delete(id)
+      knownFiles.delete(id)
     },
 
     async listRuns(paperId) {
-      let query = supabase.from('runs').select('data').order('created_at')
-      if (paperId) query = query.eq('paper_id', paperId)
-      return check(await query).map(row => row.data)
+      const rows = await readAll(() => {
+        const query = supabase.from('runs').select('data').order('created_at').order('id')
+        return paperId ? query.eq('paper_id', paperId) : query
+      })
+      return rows.map(row => row.data).filter(run => run?.id)
     },
     async saveRun(run) {
-      await ensurePaperRow(run.paperId)
-      check(await supabase.from('runs').upsert({ id: run.id, paper_id: run.paperId, owner_id: userId, data: run, created_at: run.createdAt ?? new Date().toISOString() }))
-      return run
+      return inOrder(`run:${run.id}`, async () => {
+        await ensurePaperRow(run.paperId)
+        const save = () => supabase.from('runs').upsert({ id: run.id, paper_id: run.paperId, owner_id: userId, data: run, created_at: run.createdAt ?? new Date().toISOString() })
+        let result = await save()
+        // 평가지가 다른 기기에서 지워졌으면 다시 확인하고 한 번 더 저장
+        if (result.error?.code === '23503') {
+          knownPapers.delete(run.paperId)
+          await ensurePaperRow(run.paperId)
+          result = await save()
+        }
+        check(result)
+        return run
+      })
     },
     async deleteRun(id) {
       check(await supabase.from('runs').delete().eq('id', id))
@@ -322,16 +377,17 @@ export function createCloudDb(supabase, userId) {
     async exportAll() {
       const [papers, runs] = await Promise.all([api.listPapers(), api.listRuns()])
       const files = (await Promise.all(papers.map(paper => api.listFiles(paper.id)))).flat()
-      const { blobToDataUrl } = await import('./db.js')
       const encodedFiles = await Promise.all(files.map(async file => ({ ...file, blob: undefined, dataUrl: await blobToDataUrl(file.blob) })))
       return { format: 'exam-bench-backup', version: 1, exportedAt: new Date().toISOString(), papers, runs, files: encodedFiles }
     },
     async importAll(backup) {
       if (backup?.format !== 'exam-bench-backup') throw new Error('이 서비스의 백업 파일이 아닙니다.')
+      // 다른 기기에서 지운 파일도 다시 올리도록 기억을 비움
+      knownFiles.clear()
       for (const paper of backup.papers || []) await api.savePaper(paper)
       for (const file of backup.files || []) {
         const { dataUrl, ...rest } = file
-        await api.saveFile({ ...rest, blob: await (await fetch(dataUrl)).blob() })
+        await api.saveFile({ ...rest, blob: await backupBlob(rest.type, dataUrl) })
       }
       for (const run of backup.runs || []) await api.saveRun(run)
       return { papers: backup.papers?.length || 0, runs: backup.runs?.length || 0, files: backup.files?.length || 0 }
@@ -343,11 +399,21 @@ export function createCloudDb(supabase, userId) {
   }
 
   /** @brief 파일·풀이 기록을 평가지보다 먼저 저장하는 경우를 위해, 평가지 행이 없으면 최소 행을 만듦 */
-  async function ensurePaperRow(paperId) {
+  function ensurePaperRow(paperId) {
+    if (knownPapers.has(paperId)) return Promise.resolve()
+    // 파일 여러 개를 동시에 저장해도 한 번만 확인·추가
+    return inOrder(`paper:${paperId}`, () => addPaperRow(paperId))
+  }
+  async function addPaperRow(paperId) {
+    if (knownPapers.has(paperId)) return
     const row = check(await supabase.from('papers').select('id').eq('id', paperId).maybeSingle())
-    if (row) return
+    if (row) {
+      knownPapers.add(paperId)
+      return
+    }
     const now = new Date().toISOString()
     check(await supabase.from('papers').insert({ id: paperId, owner_id: userId, data: { id: paperId, createdAt: now, updatedAt: now, pending: true, meta: {}, questions: [], files: [], cover: {} }, updated_at: now }))
+    knownPapers.add(paperId)
   }
 
   return api

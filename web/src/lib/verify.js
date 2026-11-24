@@ -119,10 +119,14 @@ function checkPoints(paper, facts) {
   return makeCheck('points', '나', '배점 합계와 총점', '모든 문항 배점의 합이 총점과 정확히 같은지, 문제지에 인쇄된 [N점] 표시와 입력한 배점이 같은지 봅니다.', items)
 }
 
+/** 문항 번호로 볼 수 있는 가장 큰 수 (엉뚱하게 큰 번호로 계산이 멈추는 것을 막음) */
+const MAX_NO = 300
+const validNo = no => Number.isInteger(no) && no >= 1 && no <= MAX_NO
+
 /** @brief 번호 목록에서 중복과 빠진 번호 */
 function numberingIssues(nos) {
   const counts = new Map()
-  for (const no of nos) counts.set(no, (counts.get(no) ?? 0) + 1)
+  for (const no of nos) if (validNo(no)) counts.set(no, (counts.get(no) ?? 0) + 1)
   const duplicates = [...counts].filter(([, count]) => count > 1).map(([no]) => no).sort((a, b) => a - b)
   const unique = [...counts.keys()].sort((a, b) => a - b)
   const gaps = []
@@ -141,6 +145,9 @@ const gapText = (gap, where) => (gap.after === 0
 /* ───── 문항 번호 누락·중복 ───── */
 function checkNumbering(paper, facts) {
   const items = []
+  for (const question of paper.questions) {
+    if (!validNo(question.no)) items.push({ level: 'error', text: `문항 번호 '${String(question.no).slice(0, 20)}'이(가) 올바르지 않습니다 (1~${MAX_NO} 사이의 정수여야 함).` })
+  }
   const own = numberingIssues(paper.questions.map(question => question.no))
   for (const no of own.duplicates) items.push({ level: 'error', no, text: `문항 구성에 ${no}번이 두 번 이상 있습니다.` })
   for (const gap of own.gaps) items.push({ level: 'error', no: gap.missing[0], text: gapText(gap, '문항 구성에서') })
@@ -151,9 +158,10 @@ function checkNumbering(paper, facts) {
     for (const gap of numberingIssues(source.nos).gaps) items.push({ level: 'error', no: gap.missing[0], text: gapText(gap, '정답표에서') })
   }
 
-  if (facts?.anchors?.length) {
+  const anchors = (facts?.anchors ?? []).filter(anchor => validNo(anchor.no))
+  if (anchors.length) {
     const paperNos = new Set(paper.questions.map(question => question.no))
-    const foundNos = new Set(facts.anchors.map(anchor => anchor.no))
+    const foundNos = new Set(anchors.map(anchor => anchor.no))
     // 번호 사이가 건너뛴 곳은 아래에서 따로 알리므로, 문제지 맨 끝 등에서 빠진 번호만 따로 알림
     const maxFound = Math.max(...foundNos)
     const minFound = Math.min(...foundNos)
@@ -166,9 +174,9 @@ function checkNumbering(paper, facts) {
       const extra = [...foundNos].filter(no => !paperNos.has(no)).sort((a, b) => a - b)
       if (extra.length) items.push({ level: 'error', no: extra[0], text: `문제지에는 ${listNos(extra)}번이 있는데 정답·문항 구성에는 없습니다.` })
       // 읽는 순서대로 번호가 건너뛰는 곳 (선택과목처럼 번호가 다시 작아지는 것은 정상)
-      for (let index = 1; index < facts.anchors.length; index += 1) {
-        const previous = facts.anchors[index - 1].no
-        const next = facts.anchors[index].no
+      for (let index = 1; index < anchors.length; index += 1) {
+        const previous = anchors[index - 1].no
+        const next = anchors[index].no
         if (next <= previous + 1) continue
         const skipped = Array.from({ length: next - previous - 1 }, (_, i) => previous + 1 + i)
         if (skipped.every(no => !foundNos.has(no))) items.push({ level: 'error', no: skipped[0], text: `문제지에서 ${previous}번 다음에 ${next}번이 나옵니다 (${listNos(skipped)}번 없음).` })
@@ -177,7 +185,7 @@ function checkNumbering(paper, facts) {
       // 같은 번호가 여러 번 (선택과목 문항은 과목 수만큼 나와도 정상)
       const electiveCount = ELECTIVES[paper.meta?.subject]?.length ?? 1
       const byNo = new Map()
-      for (const anchor of facts.anchors) {
+      for (const anchor of anchors) {
         if (!byNo.has(anchor.no)) byNo.set(anchor.no, [])
         byNo.get(anchor.no).push(anchor.index)
       }
@@ -189,7 +197,7 @@ function checkNumbering(paper, facts) {
     }
   }
   if (!items.some(item => item.level === 'error' || item.level === 'warn')) {
-    items.push({ level: 'ok', text: `1번부터 ${paper.questions.length}번까지 빠지거나 겹친 번호가 없습니다${facts?.anchors?.length ? ' (문제지와 대조함)' : ''}.` })
+    items.push({ level: 'ok', text: `1번부터 ${paper.questions.length}번까지 빠지거나 겹친 번호가 없습니다${anchors.length ? ' (문제지와 대조함)' : ''}.` })
   }
   return makeCheck('numbering', '다', '문항 번호 누락·중복', '12번 다음 14번처럼 빠진 번호나, 같은 번호가 두 번 나오는 경우를 문항 구성·정답표·문제지에서 찾습니다.', items)
 }
@@ -465,7 +473,7 @@ export function validatePaper(paper, { facts = null, runs = [] } = {}) {
     ...(usesFormType(paper.meta) ? [checkFormType(paper, facts)] : []),
     checkPages(paper, facts),
     checkAgainstRuns(paper, runs),
-    ...(facts?.notes?.length ? [makeCheck('notes', '', 'AI 검토 의견', 'AI가 문제지를 읽으며 눈에 띈 인쇄 오류·오탈자 등입니다. 직접 확인하세요.', facts.notes.map(text => ({ level: 'warn', text })))] : [])
+    ...(Array.isArray(facts?.notes) && facts.notes.length ? [makeCheck('notes', '', 'AI 검토 의견', 'AI가 문제지를 읽으며 눈에 띈 인쇄 오류·오탈자 등입니다. 직접 확인하세요.', facts.notes.slice(0, 50).map(text => ({ level: 'warn', text: String(text).slice(0, 500) })))] : [])
   ]
   // 항목 기호는 화면에 나오는 순서대로 가, 나, 다 …
   checks.forEach((check, index) => { check.letter = CHECK_LETTERS[index] ?? String(index + 1) })

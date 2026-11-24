@@ -30,6 +30,14 @@ function normalizeFor(question, value) {
   return question.type === 'choice' ? normalizeChoiceSet(text) : text
 }
 
+/**
+ * @brief 글을 줄로 나누고 이어진 공백을 하나로 줄임
+ * - 공백이 아주 길게 이어진 줄에서 아래 정규식들이 끝없이 되짚어 화면이 멈추는 것을 막음
+ */
+function toLines(text) {
+  return text.split(/\r?\n/).map(line => line.replace(/\s+/g, gap => (gap.includes('\t') ? '\t' : ' ')).trim()).filter(Boolean)
+}
+
 function fromJson(data, formType = '') {
   // {"홀수형": {...}, "짝수형": {...}} 형태면 평가지의 형만
   if (formType && data && !Array.isArray(data) && (data['홀수형'] || data['짝수형'])) data = data[formType] ?? data['홀수형'] ?? data['짝수형']
@@ -55,7 +63,7 @@ const LINE_PATTERN = /^\s*(\d{1,3})\s*(?:번|\.|\)|:|,|\t|-|=|\s)\s*([^,\t]+?)\s
  * @returns {{ entries, column: string }|null}
  */
 function fromFormColumns(text, formType) {
-  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const lines = toLines(text)
   const header = lines.find(line => /홀/.test(line) && /짝/.test(line) && /[,\t]/.test(line))
   if (!header) return null
   const cells = line => line.split(/\s*[,\t]\s*/)
@@ -87,7 +95,7 @@ function detectFormType(text, fileName, column) {
 
 function fromLines(text) {
   const entries = []
-  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const lines = toLines(text)
   // 머리글 줄(번호,정답 …) 건너뜀
   const body = lines.filter(line => !/^(번호|문항|no|q)\b/i.test(line))
   for (const line of body) {

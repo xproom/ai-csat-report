@@ -5,6 +5,7 @@
 
 let pdfjsPromise = null
 const documents = new Map()
+const MAX_OPEN_DOCUMENTS = 6
 
 async function loadPdfjs() {
   if (!pdfjsPromise) {
@@ -21,18 +22,31 @@ async function loadPdfjs() {
 
 /** @brief 파일 id별로 PDF 문서를 한 번만 연다 */
 export async function openPdf(file) {
-  if (!documents.has(file.id)) {
-    documents.set(file.id, (async () => {
+  let opening = documents.get(file.id)
+  if (!opening) {
+    opening = (async () => {
       const pdfjs = await loadPdfjs()
       const data = new Uint8Array(await file.blob.arrayBuffer())
       return pdfjs.getDocument({ data }).promise
-    })())
+    })()
+    // 열지 못한 파일은 다음에 다시 시도
+    opening.catch(() => { if (documents.get(file.id) === opening) documents.delete(file.id) })
   }
-  return documents.get(file.id)
+  // 최근에 쓴 순서로 두고, 오래 안 쓴 문서는 닫아 메모리를 비움
+  documents.delete(file.id)
+  documents.set(file.id, opening)
+  while (documents.size > MAX_OPEN_DOCUMENTS) {
+    const [oldest, old] = documents.entries().next().value
+    documents.delete(oldest)
+    old.then(pdf => pdf.loadingTask.destroy()).catch(() => {})
+  }
+  return opening
 }
 
 // 화면 캔버스마다 가장 최근 그리기 요청 번호 (늦게 끝난 옛 요청은 버림)
 const latestRequest = new WeakMap()
+// 화면 캔버스마다 지금 그리는 작업 (새 요청이 오면 멈춤)
+const renderTasks = new WeakMap()
 
 /**
  * @brief PDF 한 쪽을 캔버스 너비에 맞춰 그림
@@ -44,6 +58,7 @@ const latestRequest = new WeakMap()
 export async function renderPdfPage(file, pageNumber, canvas, cssWidth) {
   const request = (latestRequest.get(canvas) ?? 0) + 1
   latestRequest.set(canvas, request)
+  renderTasks.get(canvas)?.cancel()
   const pdf = await openPdf(file)
   const page = Math.min(Math.max(1, pageNumber), pdf.numPages)
   const pdfPage = await pdf.getPage(page)
@@ -51,13 +66,21 @@ export async function renderPdfPage(file, pageNumber, canvas, cssWidth) {
   const ratio = window.devicePixelRatio || 1
   const viewport = pdfPage.getViewport({ scale: (cssWidth / base.width) * ratio })
 
+  const stale = () => latestRequest.get(canvas) !== request
+  if (stale()) return { pageCount: pdf.numPages, page, stale: true }
   const offscreen = document.createElement('canvas')
   offscreen.width = Math.floor(viewport.width)
   offscreen.height = Math.floor(viewport.height)
-  await pdfPage.render({ canvas: offscreen, canvasContext: offscreen.getContext('2d'), viewport }).promise
+  const task = pdfPage.render({ canvas: offscreen, canvasContext: offscreen.getContext('2d'), viewport })
+  renderTasks.set(canvas, task)
+  try {
+    await task.promise
+  } catch (error) {
+    if (!stale()) throw error
+  }
 
   // 그사이 새 요청이 들어왔으면 이 결과는 버림
-  if (latestRequest.get(canvas) !== request) return { pageCount: pdf.numPages, page, stale: true }
+  if (stale()) return { pageCount: pdf.numPages, page, stale: true }
   canvas.width = offscreen.width
   canvas.height = offscreen.height
   canvas.style.width = `${cssWidth}px`

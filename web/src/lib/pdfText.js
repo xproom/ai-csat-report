@@ -93,6 +93,38 @@ async function pageItems(pdf, pageNumber) {
     })
 }
 
+/** 파일마다 쪽별 글자를 한 번만 읽어 둠 (문항 위치 찾기와 검증이 함께 씀) */
+const pagesCache = new Map()
+const MAX_CACHED_FILES = 4
+const READ_AT_ONCE = 8
+
+/** @brief 오래 안 쓴 것부터 지우는 간단한 보관함 (다시 쓰면 맨 뒤로) */
+function remember(cache, key, make, max) {
+  const value = cache.get(key) ?? make()
+  cache.delete(key)
+  cache.set(key, value)
+  while (cache.size > max) cache.delete(cache.keys().next().value)
+  // 실패한 결과는 남기지 않음
+  value.catch(() => { if (cache.get(key) === value) cache.delete(key) })
+  return value
+}
+
+/** @brief PDF 모든 쪽의 글자 조각 [{ pageNumber, items, raw }] */
+function readPages(file) {
+  return remember(pagesCache, file.id, async () => {
+    const pdf = await openPdf(file)
+    const pages = []
+    for (let start = 1; start <= pdf.numPages; start += READ_AT_ONCE) {
+      const numbers = Array.from({ length: Math.min(READ_AT_ONCE, pdf.numPages - start + 1) }, (_, i) => start + i)
+      pages.push(...await Promise.all(numbers.map(async pageNumber => {
+        const items = await pageItems(pdf, pageNumber)
+        return { pageNumber, items, raw: items.map(item => item.str).join('') }
+      })))
+    }
+    return pages
+  }, MAX_CACHED_FILES)
+}
+
 const indexCache = new Map()
 
 /**
@@ -104,17 +136,11 @@ const indexCache = new Map()
 export async function buildQuestionIndex(file, paper) {
   if (file?.type !== 'application/pdf') return null
   const form = formTypeOf(paper.meta)
-  const key = `${file.id}:${paper.questions.length}:${paper.meta?.elective ?? ''}:${form}`
-  if (indexCache.has(key)) return indexCache.get(key)
-  const promise = (async () => {
-    const pdf = await openPdf(file)
+  const key = `${file.id}:${paper.questions.map(question => `${question.no}${question.elective ? 'e' : ''}`).join(',')}:${paper.meta?.elective ?? ''}:${form}`
+  return remember(indexCache, key, async () => {
+    const source = await readPages(file)
     const maxNo = Math.max(...paper.questions.map(question => question.no))
-    const allPages = []
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const items = await pageItems(pdf, pageNumber)
-      const raw = items.map(item => item.str).join('')
-      allPages.push({ pageNumber, items, anchors: findAnchors(items, maxNo), text: raw.replace(/\s+/g, ''), form: pageFormType(raw), fileName: file.name })
-    }
+    const allPages = source.map(({ pageNumber, items, raw }) => ({ pageNumber, items, anchors: findAnchors(items, maxNo), text: raw.replace(/\s+/g, ''), form: pageFormType(raw), fileName: file.name }))
     // 한 파일에 홀수형·짝수형이 함께 있으면 평가지의 형 쪽에서만 문항을 찾음
     const forms = assignPageForms(allPages)
     const both = forms.includes('홀수형') && forms.includes('짝수형')
@@ -140,20 +166,20 @@ export async function buildQuestionIndex(file, paper) {
       return list[0] ?? null
     }
     const chosen = new Map(paper.questions.map(question => [question.no, pick(question.no)]))
-    const regionOf = no => {
-      const entry = chosen.get(no)
-      if (!entry) return null
-      return { page: entry.page.pageNumber, ...blankRegion(entry.page.items, entry.page.anchors, entry.anchor) }
+    // 빈칸 위치는 한 번만 계산해 둠 (풀이를 재생하는 동안 매 장면 다시 계산하면 화면이 끊김)
+    const regions = new Map()
+    const byPage = new Map()
+    for (const [no, entry] of chosen) {
+      if (!entry) continue
+      const region = { page: entry.page.pageNumber, ...blankRegion(entry.page.items, entry.page.anchors, entry.anchor) }
+      regions.set(no, region)
+      if (!byPage.has(region.page)) byPage.set(region.page, [])
+      byPage.get(region.page).push({ no, ...region })
     }
-    const regionsOnPage = pageNumber => paper.questions
-      .map(question => ({ no: question.no, region: regionOf(question.no) }))
-      .filter(item => item.region?.page === pageNumber)
-      .map(item => ({ no: item.no, ...item.region }))
-    return { regionOf, regionsOnPage, pageCount: pdf.numPages, pageNumbers: pages.map(page => page.pageNumber), found: [...chosen.values()].filter(Boolean).length }
-  })()
-  indexCache.set(key, promise)
-  promise.catch(() => indexCache.delete(key))
-  return promise
+    const regionOf = no => regions.get(no) ?? null
+    const regionsOnPage = pageNumber => byPage.get(pageNumber) ?? []
+    return { regionOf, regionsOnPage, pageCount: source.length, pageNumbers: pages.map(page => page.pageNumber), found: regions.size }
+  }, MAX_CACHED_FILES * 2)
 }
 
 /* ───────────── 검증용: 문제지에서 읽어 낸 사실(문항 번호·배점 표시·선지·쪽 번호) ───────────── */
@@ -177,7 +203,9 @@ function readingOrder(items) {
 }
 
 /** @brief 문항 글에서 선지 번호(①~⑤)와 선지 내용, 복수 선택 여부, 배점 표시 읽기 */
-export function analyzeQuestionText(text) {
+export function analyzeQuestionText(source) {
+  // 이어진 공백을 하나로 (아주 긴 공백에서 정규식이 느려지는 것을 막음)
+  const text = source.replace(/\s+/g, ' ')
   const marks = []
   const positions = []
   for (let index = 0; index < text.length; index += 1) {
@@ -241,11 +269,8 @@ export async function extractPaperFacts(files, paper) {
   const all = []
   let index = 0
   for (const file of pdfFiles) {
-    const pdf = await openPdf(file)
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    for (const { pageNumber, items, raw: text } of await readPages(file)) {
       index += 1
-      const items = await pageItems(pdf, pageNumber)
-      const text = items.map(item => item.str).join('')
       all.push({ index, fileName: file.name, page: pageNumber, items, text, compact: text.replace(/\s+/g, ''), form: pageFormType(text) })
     }
   }

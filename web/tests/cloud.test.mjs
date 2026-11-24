@@ -29,12 +29,14 @@ function fakeSupabase() {
       }
       let result = rows.filter(match)
       if (state.order) result = [...result].sort((a, b) => String(a[state.order.key]).localeCompare(String(b[state.order.key])) * (state.order.ascending ? 1 : -1))
+      if (state.range) result = result.slice(state.range[0], state.range[1] + 1)
       return { data: state.single ? result[0] ?? null : result, error: null }
     }
     const builder = {
       select() { return builder },
       eq(key, value) { state.filters.push([key, value]); return builder },
       order(key, options = {}) { state.order = { key, ascending: options.ascending !== false }; return builder },
+      range(from, to) { state.range = [from, to]; return builder },
       maybeSingle() { state.single = true; return builder },
       upsert(payload) { state.op = 'upsert'; state.payload = payload; return builder },
       insert(payload) { state.op = 'insert'; state.payload = payload; return builder },

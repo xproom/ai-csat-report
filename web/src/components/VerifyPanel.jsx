@@ -141,7 +141,7 @@ export default function VerifyPanel({ paper, files, runs = [], onChange, onEditQ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
-  const facts = mergeFacts(pdfFacts, aiFacts)
+  const facts = useMemo(() => mergeFacts(pdfFacts, aiFacts), [pdfFacts, aiFacts])
   const result = useMemo(() => validatePaper(paper, { facts, runs }), [paper, facts, runs])
   // AI 정밀 검증이 필요한 경우: 사진·스캔본처럼 글자가 없거나, 문제지에서 못 읽은 문항·선지가 있을 때
   const aiReason = aiNeededReason(paper, files, pdfFacts, key)

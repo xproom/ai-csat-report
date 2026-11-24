@@ -3,8 +3,7 @@
  * @brief 평가지 상세 - 표지 / 문제지 / 정답·배점 / 검증 / AI 풀이 / 채점 결과(성적표·OMR 답안지·문항 통계) 탭
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import AnswerKeyEditor from '@/components/AnswerKeyEditor'
 import AnswerKeyUpload from '@/components/AnswerKeyUpload'
 import CoverOptionsForm from '@/components/CoverOptionsForm'
@@ -15,11 +14,15 @@ import PaperCover from '@/components/PaperCover'
 import RunPanel from '@/components/RunPanel'
 import VerifyPanel, { LevelBadge } from '@/components/VerifyPanel'
 import { applyAnswerKeyText } from '@/lib/answerKey'
-import { db } from '@/lib/db'
+import { db, getBackend } from '@/lib/db'
 import { formatRate, gradeRun, questionStats } from '@/lib/grading'
 import { makeId, paperTitle, QUESTION_TYPES } from '@/lib/schema'
 import { navigate, useStore } from '@/lib/store'
+import { useAutosave } from '@/lib/useAutosave'
 import { checkCounts, validateStored } from '@/lib/verify'
+
+// 그래프 도구는 채점 결과를 볼 때만 내려받음
+const RateChart = lazy(() => import('@/components/RateChart'))
 
 const TABS = [
   ['cover', '표지'],
@@ -35,24 +38,10 @@ const currentTime = () => Date.now()
 
 const SOURCE_LABEL = { ai: 'AI 실행', manual: '직접 입력', import: '가져옴' }
 
-/** @brief 평가지 수정 내용을 잠시 뒤 자동 저장 */
-function useAutosave(paper, onSaved) {
-  const onSavedRef = useRef(onSaved)
-  useEffect(() => { onSavedRef.current = onSaved }, [onSaved])
-  useEffect(() => {
-    if (!paper) return undefined
-    const timer = setTimeout(async () => {
-      await db.savePaper(paper)
-      onSavedRef.current?.()
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [paper])
-}
-
 export default function PaperPage({ paperId, tab: requestedTab, runId, edit }) {
   // 예전 "OMR 채점" 탭 주소(tab=omr)는 채점 결과 탭으로 (OMR 답안지가 채점 결과 안에 있음)
   const tab = requestedTab === 'omr' ? 'results' : requestedTab
-  const { papers, runs: allRuns, refresh, notify } = useStore()
+  const { papers, runs: allRuns, refresh, applyPaper, notify } = useStore()
   const stored = papers.find(item => item.id === paperId)
   // 사용자가 고친 내용만 draft에 담고, 고치기 전에는 저장된 평가지를 그대로 보여줌
   const [draft, setDraft] = useState(null)
@@ -65,11 +54,13 @@ export default function PaperPage({ paperId, tab: requestedTab, runId, edit }) {
 
   useEffect(() => {
     let cancelled = false
-    db.listFiles(paperId).then(list => { if (!cancelled) setFiles(list.sort((a, b) => a.order - b.order)) })
+    db.listFiles(paperId)
+      .then(list => { if (!cancelled) setFiles([...list].sort((a, b) => a.order - b.order)) })
+      .catch(error => { if (!cancelled) notify(error?.message || '문제지 파일을 불러오지 못했습니다.', 'error') })
     return () => { cancelled = true }
-  }, [paperId])
+  }, [paperId, notify])
 
-  useAutosave(draft, refresh)
+  const autosave = useAutosave(draft, applyPaper, error => notify(`저장하지 못했습니다: ${error?.message || '알 수 없는 오류'}`, 'error'))
 
   if (!stored || !paper) {
     return (
@@ -95,7 +86,12 @@ export default function PaperPage({ paperId, tab: requestedTab, runId, edit }) {
 
   const addFiles = async list => {
     const records = list.map((file, index) => ({ id: makeId('file'), paperId, name: file.name, type: file.type, size: file.size, blob: file, order: files.length + index }))
-    for (const record of records) await db.saveFile(record)
+    try {
+      await Promise.all(records.map(record => db.saveFile(record)))
+    } catch (error) {
+      notify(error?.message || '문제지를 올리지 못했습니다.', 'error')
+      return
+    }
     const next = [...files, ...records]
     setFiles(next)
     setPaper(prev => ({ ...prev, files: next.map(({ id, name, type, size }) => ({ id, name, type, size })) }))
@@ -111,10 +107,18 @@ export default function PaperPage({ paperId, tab: requestedTab, runId, edit }) {
 
   const removePaper = async () => {
     if (!window.confirm(`'${paperTitle(paper)}' 평가지와 문제지 파일, 풀이 기록 ${runs.length}개를 모두 삭제합니다. 되돌릴 수 없습니다.`)) return
-    await db.deletePaper(paperId)
-    await refresh()
-    notify('평가지를 삭제했습니다.')
+    // 자동 저장을 멈춤 (지운 평가지가 뒤늦은 저장으로 되살아나지 않게)
+    await autosave().discard()
+    try {
+      await db.deletePaper(paperId)
+    } catch (error) {
+      autosave().resume()
+      notify(error?.message || '평가지를 삭제하지 못했습니다.', 'error')
+      return
+    }
     navigate('/')
+    notify('평가지를 삭제했습니다.')
+    await refresh()
   }
 
   return (
@@ -199,7 +203,7 @@ export default function PaperPage({ paperId, tab: requestedTab, runId, edit }) {
 
 /** @brief 머리말의 검증 결과 표시 (누르면 검증 탭) */
 function VerifyChip({ paper, runs, onClick }) {
-  const result = validateStored(paper, runs)
+  const result = useMemo(() => validateStored(paper, runs), [paper, runs])
   // 검증 탭 위 요약과 같은 기준(검증 항목 수)으로 셈
   const counts = checkCounts(result)
   const label = result.status === 'error' ? `검증 오류 ${counts.error}` : result.status === 'warn' ? `확인 필요 ${counts.warn}` : '검증 통과'
@@ -318,7 +322,7 @@ function ScoreBoard({ paper, results, selectedId, onSelect, onRemove }) {
 
 /** @brief OMR 답안지 - 고른 풀이의 마킹·채점 표시, 직접 마킹 수정, 서술형 채점 */
 function OmrSheet({ paper, runs, current, edit, onSelect }) {
-  const { refresh } = useStore()
+  const { applyRun, notify } = useStore()
   const [showGrading, setShowGrading] = useState(true)
   // 풀이 선택이 바뀌면 key로 다시 마운트되므로 처음 값만 받고, 이후에는 이 화면이 가진 최신 값 기준으로 저장
   const [draft, setDraft] = useState(current)
@@ -328,8 +332,14 @@ function OmrSheet({ paper, runs, current, edit, onSelect }) {
   const persist = async next => {
     draftRef.current = next
     setDraft(next)
-    await db.saveRun(next)
-    refresh()
+    const backend = getBackend()
+    try {
+      await backend.saveRun(next)
+      // 그사이 더 마킹했으면 마지막 저장 때 반영
+      if (draftRef.current === next) applyRun(next, backend)
+    } catch (error) {
+      notify(`저장하지 못했습니다: ${error?.message || '알 수 없는 오류'}`, 'error')
+    }
   }
 
   // 직접 입력: 첫 마킹부터 마지막 마킹까지의 시간을 수행 시간으로 기록
@@ -465,19 +475,7 @@ function ResultsTab({ paper, runs, files, runId, edit }) {
             <h3 className="text-lg font-extrabold">문항별 정답률</h3>
             <p className="mb-3 text-xs text-[var(--color-ink-soft)]">풀이 기록 {runs.length}건 기준 · 빨강 50% 미만, 노랑 80% 미만</p>
             <div className="h-56 sm:h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stats.map(item => ({ ...item, pct: item.rate === null ? 0 : Math.round(item.rate * 100) }))} margin={{ top: 8, right: 4, left: -24, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke="#ece7db" />
-                  <XAxis dataKey="no" tick={{ fontSize: 11 }} interval="preserveStartEnd" tickLine={false} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <Tooltip formatter={value => [`${value}%`, '정답률']} labelFormatter={label => `${label}번`} />
-                  <Bar dataKey="pct" radius={[4, 4, 0, 0]}>
-                    {stats.map(item => (
-                      <Cell key={item.no} fill={item.rate === null ? '#d6d0c2' : item.rate < 0.5 ? 'var(--color-pen)' : item.rate < 0.8 ? 'var(--color-accent)' : 'var(--color-brand)'} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <Suspense fallback={null}><RateChart stats={stats} /></Suspense>
             </div>
           </div>
           <div className="card p-3 sm:p-5">

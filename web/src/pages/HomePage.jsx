@@ -39,12 +39,12 @@ export default function HomePage() {
   }), [papers, level, examType, query])
 
   /** @brief 목록 카드 아래 줄: 검증 상태와 최근 AI 풀이 점수 */
-  const summaryOf = paper => {
+  const summaries = useMemo(() => new Map(papers.map(paper => {
     const paperRuns = runs.filter(run => run.paperId === paper.id)
     const verify = validateStored(paper, paperRuns)
     const latest = [...paperRuns].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]
-    return { verify, latest: latest ? { model: latest.model, ...gradeRun(paper, latest) } : null, count: paperRuns.length }
-  }
+    return [paper.id, { verify, counts: checkCounts(verify), latest: latest ? { model: latest.model, ...gradeRun(paper, latest) } : null }]
+  })), [papers, runs])
 
   return (
     <div className="space-y-10">
@@ -120,7 +120,7 @@ export default function HomePage() {
         ) : (
           <div className="grid gap-5 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {filtered.map(paper => {
-              const summary = summaryOf(paper)
+              const summary = summaries.get(paper.id)
               const [verifyLabel, verifyTone] = VERIFY_LABEL[summary.verify.status]
               return (
                 <a key={paper.id} href={`#/paper/${paper.id}?tab=check`} className="group block">
@@ -131,7 +131,7 @@ export default function HomePage() {
                     <div className="font-bold text-sm leading-snug line-clamp-2 break-keep">{paperTitle(paper)}</div>
                     <div className="mt-1 text-xs text-[var(--color-ink-soft)]">
                       <b className={verifyTone}>{verifyLabel}</b>
-                      {summary.verify.status !== 'ok' && <span> {checkCounts(summary.verify).error + checkCounts(summary.verify).warn}개 항목</span>}
+                      {summary.verify.status !== 'ok' && <span> {summary.counts.error + summary.counts.warn}개 항목</span>}
                       {' · '}
                       {summary.latest ? <>AI {summary.latest.score}/{summary.latest.maxScore}점</> : 'AI 풀이 전'}
                     </div>

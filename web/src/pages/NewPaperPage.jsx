@@ -17,7 +17,7 @@ import PaperCover from '@/components/PaperCover'
 import SolveViewer from '@/components/SolveViewer'
 import VerifyPanel from '@/components/VerifyPanel'
 import { applyAnswerKeyText } from '@/lib/answerKey'
-import { db } from '@/lib/db'
+import { getBackend } from '@/lib/db'
 import { createPaper, makeId, missingAnswers, paperTitle } from '@/lib/schema'
 import { navigate, useStore } from '@/lib/store'
 
@@ -26,7 +26,7 @@ const VERIFY_STEP = 2
 const AI_STEP = 3
 
 export default function NewPaperPage() {
-  const { runs: allRuns, refresh, notify } = useStore()
+  const { runs: allRuns, applyPaper, notify } = useStore()
   const [paper, setPaper] = useState(() => createPaper())
   const [files, setFiles] = useState([])
   const [step, setStep] = useState(0)
@@ -43,15 +43,15 @@ export default function NewPaperPage() {
   /** @brief 지금 내용으로 평가지·문제지 저장 (처음 저장과 다시 저장 모두) */
   const persist = async (current = paper) => {
     const records = files.map((file, order) => ({ ...file, paperId: paper.id, order }))
-    for (const record of records) await db.saveFile(record)
+    const backend = getBackend()
     const keptIds = new Set(records.map(record => record.id))
-    for (const id of savedFileIds.current) {
-      if (!keptIds.has(id)) await db.deleteFile(id)
-    }
+    await Promise.all([
+      ...records.map(record => backend.saveFile(record)),
+      ...[...savedFileIds.current].filter(id => !keptIds.has(id)).map(id => backend.deleteFile(id))
+    ])
     savedFileIds.current = keptIds
     const next = { ...current, files: records.map(({ id, name, type, size }) => ({ id, name, type, size })) }
-    await db.savePaper(next)
-    await refresh()
+    applyPaper(await backend.savePaper(next), backend)
     return records
   }
 

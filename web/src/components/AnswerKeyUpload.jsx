@@ -13,6 +13,8 @@ import { missingAnswers, QUESTION_TYPES } from '@/lib/schema'
 import { getApiKey } from '@/lib/settings'
 import { Icon } from './Layout'
 
+/** 정답표 글자 수 한도 (엉뚱한 큰 파일로 화면이 멈추지 않게) */
+const MAX_KEY_CHARS = 300000
 const TEXT_TYPES = /\.(csv|tsv|txt|json)$/i
 const SCAN_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif']
 
@@ -35,6 +37,10 @@ export default function AnswerKeyUpload({ paper, onApply, onPendingChange }) {
   const [fileName, setFileNameState] = useState('')
   // 반영 전 정답표를 부모에게 알림 (다음 단계로 넘어갈 때 반영 여부를 묻는 데 씀)
   const setText = (value, name = fileName) => {
+    if (String(value).length > MAX_KEY_CHARS) {
+      setError('정답표가 너무 큽니다. 정답이 있는 부분만 올려 주세요.')
+      return
+    }
     setTextState(value)
     onPendingChange?.(String(value).trim() ? { text: value, fileName: name || '직접 붙여넣기' } : null)
   }
@@ -58,6 +64,10 @@ export default function AnswerKeyUpload({ paper, onApply, onPendingChange }) {
     setError('')
     setFileName(file.name)
     if (TEXT_TYPES.test(file.name) || file.type.startsWith('text/') || file.type === 'application/json') {
+      if (file.size > MAX_KEY_CHARS * 4) {
+        setError('정답표가 너무 큽니다. 정답이 있는 부분만 올려 주세요.')
+        return
+      }
       setText(await file.text(), file.name)
       return
     }

@@ -5,7 +5,7 @@
  * - 지금 푸는 문제가 보이도록 문제지 영역(scrollRef) 안에서만 스크롤
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { MIN_FIT, NOTE_COLOR, NOTE_FONT, NOTE_LINE_HEIGHT, NOTE_SIZE, answerLabel } from '@/lib/noteStyle'
 import { renderPdfPage } from '@/lib/pdfRender'
 
@@ -15,30 +15,56 @@ import { renderPdfPage } from '@/lib/pdfRender'
  * - 상자를 늘리면 다음 문제를 가릴 수 있으므로, 지금 푸는(또는 고른) 문제만 자동으로 늘리고
  *   이미 푼 문제는 「풀이 더 보기」를 눌러 펼침
  */
-function NoteBlock({ annotation }) {
+const NoteBlock = memo(function NoteBlock({ annotation }) {
   const { notes = [], active, x0, x1, top, bottom, type } = annotation
   const boxRef = useRef(null)
   const innerRef = useRef(null)
-  const [fit, setFit] = useState(1)
+  const fitRef = useRef(1)
   const [overflowing, setOverflowing] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const textKey = notes.map(note => note.visible).join('|')
 
   // 빈칸 높이에 비해 글이 얼마나 긴지 재서 글자 크기를 맞춤
+  // - 크기는 화면 요소에 바로 적고 한 번에 정함 (상태로 되풀이하면 커졌다 작아지기를 반복해 화면이 멈출 수 있음)
   useLayoutEffect(() => {
     const box = boxRef.current
     const inner = innerRef.current
-    if (!box || !inner) return
-    const pageHeight = box.parentElement?.clientHeight ?? 0
-    const style = getComputedStyle(box)
-    const available = (bottom - top) * pageHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - 4
-    const ratio = inner.scrollHeight / Math.max(1, available)
-    setFit(prev => {
-      const next = ratio > 1.01 ? prev / ratio : prev < 1 && ratio < 0.8 ? Math.min(1, (prev / ratio) * 0.95) : prev
-      return Math.max(MIN_FIT, Math.min(1, Number(next.toFixed(3))))
-    })
-    setOverflowing(ratio > 1.01 && fit <= MIN_FIT + 0.001)
-  }, [textKey, fit, top, bottom])
+    const page = box?.parentElement
+    if (!inner || !page) return undefined
+    const refit = () => {
+      const style = getComputedStyle(box)
+      const available = (bottom - top) * page.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - 4
+      // 문제지 그림이 아직 없어 높이를 모르면 나중에 (아래 ResizeObserver)
+      if (available <= 0) return
+      const heightAt = fit => {
+        fitRef.current = fit
+        inner.style.setProperty('--fit', String(fit))
+        return inner.scrollHeight
+      }
+      const limit = available * 1.01
+      const now = heightAt(fitRef.current)
+      let fits = now <= limit
+      // 지금 크기로 충분하면 그대로 (글을 쓰는 동안 크기가 들쭉날쭉하지 않게)
+      if (!fits || (fitRef.current < 1 && now < available * 0.8)) {
+        fits = heightAt(1) <= limit
+        if (!fits) {
+          let low = MIN_FIT
+          let high = 1
+          for (let step = 0; step < 5; step += 1) {
+            const middle = (low + high) / 2
+            if (heightAt(middle) <= limit) low = middle
+            else high = middle
+          }
+          fits = heightAt(Number(low.toFixed(3))) <= limit
+        }
+      }
+      setOverflowing(!fits)
+    }
+    refit()
+    const observer = new ResizeObserver(refit)
+    observer.observe(page)
+    return () => observer.disconnect()
+  }, [textKey, top, bottom])
 
   const showAll = overflowing && (active || expanded)
   return (
@@ -56,12 +82,12 @@ function NoteBlock({ annotation }) {
       }}
       data-note-no={annotation.no}
     >
-      <div ref={innerRef}>
+      <div ref={innerRef} style={{ '--fit': 1 }}>
         {notes.map((note, index) => (
           <div
             key={index}
             className="break-words"
-            style={{ fontSize: `${((NOTE_SIZE[note.kind] ?? NOTE_SIZE.work) * fit * 100).toFixed(3)}cqw`, lineHeight: NOTE_LINE_HEIGHT, color: NOTE_COLOR[note.kind] ?? NOTE_COLOR.work, fontWeight: note.kind === 'answer' ? 700 : 400 }}
+            style={{ fontSize: `calc(var(--fit) * ${((NOTE_SIZE[note.kind] ?? NOTE_SIZE.work) * 100).toFixed(3)}cqw)`, lineHeight: NOTE_LINE_HEIGHT, color: NOTE_COLOR[note.kind] ?? NOTE_COLOR.work, fontWeight: note.kind === 'answer' ? 700 : 400 }}
           >
             {note.kind === 'answer' ? answerLabel(type, note.visible) : note.visible}
             {note.writing && <span className="ml-0.5 inline-block w-[2px] animate-pulse align-middle" style={{ height: '1em', background: NOTE_COLOR.work }} />}
@@ -79,6 +105,14 @@ function NoteBlock({ annotation }) {
       )}
     </div>
   )
+}, (prev, next) => sameAnnotation(prev.annotation, next.annotation))
+
+/** @brief 보이는 내용이 같은 풀이 기록인지 (같으면 다시 그리지 않음) */
+function sameAnnotation(a, b) {
+  return a.no === b.no && a.active === b.active && a.type === b.type
+    && a.x0 === b.x0 && a.x1 === b.x1 && a.top === b.top && a.bottom === b.bottom
+    && a.notes.length === b.notes.length
+    && a.notes.every((note, index) => note.kind === b.notes[index].kind && note.visible === b.notes[index].visible && note.writing === b.notes[index].writing)
 }
 
 export default function PageView({ files, pageRef, placeholder, onPageCount, annotations = [], scrollRef = null }) {

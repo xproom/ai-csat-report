@@ -7,7 +7,6 @@
  * - 다른 회사 모델 결과는 '결과 가져오기(JSON)'나 OMR 직접 입력으로 추가합니다.
  */
 
-import Anthropic from '@anthropic-ai/sdk'
 import { blobToBase64 } from './db.js'
 import { formTypeOf, makeId, QUESTION_TYPES } from './schema.js'
 import { electiveNote, electiveOf, formNote } from './presets.js'
@@ -173,6 +172,7 @@ export async function runClaudeOnPaper({ apiKey, model, effort = 'high', paper, 
  * @returns {Promise<{ response, text: string, durationMs: number }>} durationMs는 요청 시작부터 응답까지의 실제 시간
  */
 async function callClaude({ apiKey, modelInfo, effort, system, content, signal, schema = ANSWER_SCHEMA }) {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk')
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
   const started = performance.now()
   const request = {
@@ -278,7 +278,7 @@ export function importRuns(json, paper) {
   return items.map(item => {
     if (!item?.model) throw new Error('각 결과에 "model" 이름이 필요합니다.')
     const raw = Array.isArray(item.answers)
-      ? Object.fromEntries(item.answers.map(entry => [entry.no, entry.answer]))
+      ? Object.fromEntries(item.answers.filter(Boolean).map(entry => [entry.no, entry.answer]))
       : item.answers || {}
     const answers = {}
     for (const question of paper.questions) {
@@ -312,6 +312,7 @@ export function importRuns(json, paper) {
 const STALL_MS = 3 * 60 * 1000
 const TOTAL_MS = 12 * 60 * 1000
 async function streamClaudeJson({ apiKey, modelInfo, effort, system, content, schema, signal, onText, onWaiting }) {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk')
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 1, timeout: TOTAL_MS })
   const started = performance.now()
   const controller = new AbortController()

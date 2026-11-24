@@ -6,6 +6,8 @@
  * - 화면 코드는 늘 db를 쓰면 되고, 지금 어느 저장소인지는 db.kind로 알 수 있음
  */
 
+import { backupBlob } from './files.js'
+
 const DB_NAME = 'exam-bench'
 const DB_VERSION = 1
 const STORES = ['papers', 'files', 'runs']
@@ -113,7 +115,7 @@ export const localDb = {
     if (backup?.format !== 'exam-bench-backup') throw new Error('이 서비스의 백업 파일이 아닙니다.')
     const files = await Promise.all((backup.files || []).map(async file => {
       const { dataUrl, ...rest } = file
-      return { ...rest, blob: await (await fetch(dataUrl)).blob() }
+      return { ...rest, blob: await backupBlob(rest.type, dataUrl) }
     }))
     await withStore('papers', 'readwrite', store => (backup.papers || []).forEach(paper => store.put(paper)))
     await withStore('runs', 'readwrite', store => (backup.runs || []).forEach(run => store.put(run)))
@@ -132,6 +134,9 @@ let backend = localDb
 export function setBackend(next) {
   backend = next ?? localDb
 }
+
+/** @brief 지금 쓰는 저장소 자체 (나중에 로그아웃해도 시작할 때의 저장소에 저장하려고 미리 잡아 둘 때) */
+export const getBackend = () => backend
 
 /** @brief 지금 쓰는 저장소로 연결되는 db (함수 모양은 localDb와 같음) */
 export const db = new Proxy({}, {

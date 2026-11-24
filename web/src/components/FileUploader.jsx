@@ -4,9 +4,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { FILE_TYPES as ACCEPTED_TYPES, viewableBlob } from '@/lib/files'
 import { Icon } from './Layout'
 
-const ACCEPTED_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const MAX_FILE_MB = 30
 
 function formatSize(bytes) {
@@ -92,7 +92,10 @@ export function FileUploader({ files, onAdd, onRemove }) {
 export function PaperViewer({ files }) {
   const [index, setIndex] = useState(0)
   const current = files[Math.min(index, files.length - 1)]
-  const url = useMemo(() => (current?.blob ? URL.createObjectURL(current.blob) : ''), [current])
+  const url = useMemo(() => {
+    const blob = viewableBlob(current)
+    return blob ? URL.createObjectURL(blob) : ''
+  }, [current])
   useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
 
   if (!files.length) {
@@ -124,7 +127,9 @@ export function PaperViewer({ files }) {
         )}
       </div>
       <div className="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[#525659]">
-        {current.type === 'application/pdf'
+        {!url
+          ? <p className="px-6 py-14 text-center text-white">표시할 수 없는 파일입니다.</p>
+          : current.type === 'application/pdf'
           ? <iframe title={current.name} src={url} className="w-full h-[75vh] min-h-[420px] bg-white" />
           : <img src={url} alt={`${current.name} 문제지`} className="mx-auto max-h-[80vh] w-auto bg-white" />}
       </div>

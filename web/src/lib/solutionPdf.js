@@ -192,7 +192,8 @@ export async function downloadSolutionPdf({ paper, run, file, onProgress }) {
     const ctx = canvas.getContext('2d')
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise
+    // intent 'print': 다른 탭을 보는 동안에도 멈추지 않음
+    await page.render({ canvas, canvasContext: ctx, viewport, intent: 'print' }).promise
 
     const overflowed = []
     for (const region of index.regionsOnPage(pageNumber)) {

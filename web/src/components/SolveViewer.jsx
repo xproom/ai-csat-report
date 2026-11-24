@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CLAUDE_MODELS, EFFORT_LEVELS } from '@/lib/aiRunner'
-import { db } from '@/lib/db'
+import { getBackend } from '@/lib/db'
 import { gradeRun } from '@/lib/grading'
 import { runLiveSolve } from '@/lib/liveSolve'
 import { buildQuestionIndex } from '@/lib/pdfText'
@@ -25,6 +25,8 @@ import GradeSheet from './GradeSheet'
 import PageView from './PageView'
 
 const SPEEDS = [1, 2, 4, 8, 16]
+/** 재생 화면을 다시 그리는 간격 (초당 약 20번이면 글씨가 써지는 모습이 자연스러움) */
+const FRAME_MS = 48
 const CIRCLED = ['①', '②', '③', '④', '⑤']
 
 /**
@@ -41,7 +43,7 @@ function guessPage(paper, files, no, pageCounts) {
 }
 
 export default function SolveViewer({ paper, runs, files, initialRunId }) {
-  const { refresh, notify } = useStore()
+  const { applyRun, notify } = useStore()
   const sortedRuns = useMemo(() => [...runs].sort((a, b) => (b.trace ? 1 : 0) - (a.trace ? 1 : 0)), [runs])
   const [runId, setRunId] = useState(() => (initialRunId && runs.some(run => run.id === initialRunId) ? initialRunId : sortedRuns[0]?.id))
   const run = runs.find(item => item.id === runId) ?? null
@@ -80,6 +82,8 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
     let frame
     let last = performance.now()
     const tick = now => {
+      frame = requestAnimationFrame(tick)
+      if (now - last < FRAME_MS) return
       if (isLive) {
         const { lastT, lastAt } = liveRef.current
         setClock(lastAt ? lastT + (now - lastAt) : 0)
@@ -92,7 +96,6 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
         })
       }
       last = now
-      frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
@@ -147,17 +150,21 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
   }, [files, paper])
 
   /** @brief OMR 문항을 누르면 그 문항의 문제·풀이를 보여줌 (같은 문항을 다시 누르면 닫힘) */
-  const selectQuestion = no => {
-    if (!live) setPlaying(false)
+  const hasLive = Boolean(live)
+  const selectQuestion = useCallback(no => {
+    if (!hasLive) setPlaying(false)
     setFocusNo(prev => (prev === no ? null : no))
-  }
+  }, [hasLive])
   const done = Boolean(view?.done && !live)
 
+  // 마킹한 문항이 바뀔 때만 답안지를 다시 그림
+  const answeredKey = view ? [...view.answeredNos].join(',') : ''
+  const liveAnswers = live?.answers
   const shownAnswers = useMemo(() => {
-    if (live) return live.answers
-    if (!run || !view) return {}
-    return Object.fromEntries([...view.answeredNos].map(no => [no, run.answers?.[no]]).filter(([, entry]) => entry))
-  }, [live, run, view])
+    if (liveAnswers) return liveAnswers
+    if (!run || !answeredKey) return {}
+    return Object.fromEntries(answeredKey.split(',').map(no => [no, run.answers?.[no]]).filter(([, entry]) => entry))
+  }, [liveAnswers, run, answeredKey])
 
   const result = useMemo(() => (run && done ? gradeRun(paper, run) : null), [run, done, paper])
   const gradedItems = useMemo(() => (result ? new Map(result.items.map(item => [item.no, item])) : null), [result])
@@ -178,6 +185,8 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
 
   const startLive = async () => {
     const controller = new AbortController()
+    // 시작할 때의 저장소에 저장 (푸는 사이 로그아웃해도 다른 곳에 남지 않게)
+    const backend = getBackend()
     liveRef.current = { lastT: 0, lastAt: 0, controller }
     setPlaying(false)
     setClock(0)
@@ -210,8 +219,8 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
         return
       }
       setFocusNo(null)
-      await db.saveRun(saved)
-      await refresh()
+      await backend.saveRun(saved)
+      applyRun(saved, backend)
       if (saved.fatalError) notify(`오류로 멈췄습니다. 푼 ${answeredCount}문항까지 저장했습니다.`, 'error')
       else notify(saved.note ? '풀이를 멈췄습니다. 푼 문항까지 저장했습니다.' : `${saved.model} 풀이를 마쳤습니다.`)
       setLive(null)

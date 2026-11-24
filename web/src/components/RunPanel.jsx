@@ -6,7 +6,7 @@
 import { useRef, useState } from 'react'
 import LlmModelPicker from '@/components/LlmModelPicker'
 import { CLAUDE_MODELS, EFFORT_LEVELS, importRuns, runClaudeOnPaper } from '@/lib/aiRunner'
-import { db } from '@/lib/db'
+import { getBackend } from '@/lib/db'
 import { runLlmOnPaper } from '@/lib/llmRunner'
 import { makeId, missingAnswers } from '@/lib/schema'
 import { getApiKey, getProviderKey } from '@/lib/settings'
@@ -24,7 +24,7 @@ const IMPORT_EXAMPLE = `{
 }`
 
 export default function RunPanel({ paper, files }) {
-  const { refresh, notify } = useStore()
+  const { applyRun, notify } = useStore()
   const [tab, setTab] = useState('ai')
   const [selected, setSelected] = useState(() => (getApiKey() ? [CLAUDE_MODELS[0].id] : []))
   // Claude 외 LLM 모델 [{ id, providerId, model, label }]
@@ -45,25 +45,35 @@ export default function RunPanel({ paper, files }) {
     const controller = new AbortController()
     abortRef.current = controller
     setRunning(true)
+    const backend = getBackend()
+    // 여러 모델이 함께 쓰는 문제지 그림 (한 번만 만듦)
+    const shared = {}
     const jobs = [
-      ...(apiKey ? selected : []).map(id => ({ id, label: CLAUDE_MODELS.find(model => model.id === id)?.label, start: options => runClaudeOnPaper({ ...options, apiKey, model: id, effort }) })),
-      ...others.map(item => ({ id: item.id, label: item.label, start: options => runLlmOnPaper({ ...options, providerId: item.providerId, apiKey: getProviderKey(item.providerId), model: item.model }) }))
+      ...(apiKey ? selected : []).map(id => ({ id, group: 'anthropic', label: CLAUDE_MODELS.find(model => model.id === id)?.label, start: options => runClaudeOnPaper({ ...options, apiKey, model: id, effort }) })),
+      ...others.map(item => ({ id: item.id, group: item.providerId, label: item.label, start: options => runLlmOnPaper({ ...options, shared, providerId: item.providerId, apiKey: getProviderKey(item.providerId), model: item.model }) }))
     ]
     setProgress(jobs.map(({ id, label }) => ({ id, label, state: 'waiting', message: '' })))
-    for (const { id, start } of jobs) {
-      if (controller.signal.aborted) break
+    const runOne = async ({ id, start }) => {
       setProgress(prev => prev.map(item => item.id === id ? { ...item, state: 'running' } : item))
       try {
         const run = await start({ paper, files, signal: controller.signal })
-        await db.saveRun(run)
+        await backend.saveRun(run)
+        applyRun(run, backend)
         const answered = Object.values(run.answers).filter(entry => entry.status === 'answered').length
         setProgress(prev => prev.map(item => item.id === id ? { ...item, state: 'done', message: `${answered}/${paper.questions.length}문항 답변 · ${(run.durationMs / 1000).toFixed(0)}초` } : item))
       } catch (error) {
         const message = controller.signal.aborted ? '중단됨' : (error?.message || '실패')
         setProgress(prev => prev.map(item => item.id === id ? { ...item, state: 'error', message } : item))
       }
-      await refresh()
     }
+    // 회사가 다르면 동시에, 같은 회사는 사용량 제한에 걸리지 않게 하나씩
+    const groups = [...new Set(jobs.map(job => job.group))].map(group => jobs.filter(job => job.group === group))
+    await Promise.all(groups.map(async group => {
+      for (const job of group) {
+        if (controller.signal.aborted) return
+        await runOne(job)
+      }
+    }))
     setRunning(false)
     abortRef.current = null
   }
@@ -83,8 +93,14 @@ export default function RunPanel({ paper, files }) {
       durationMs: 0,
       note: ''
     }
-    await db.saveRun(run)
-    await refresh()
+    const backend = getBackend()
+    try {
+      await backend.saveRun(run)
+    } catch (error) {
+      notify(error?.message || '저장하지 못했습니다.', 'error')
+      return
+    }
+    applyRun(run, backend)
     setManualName('')
     navigate(`/paper/${paper.id}?tab=results&run=${run.id}&edit=1`)
   }
@@ -92,8 +108,11 @@ export default function RunPanel({ paper, files }) {
   const doImport = async (text = importText) => {
     try {
       const created = importRuns(JSON.parse(text), paper)
-      for (const run of created) await db.saveRun(run)
-      await refresh()
+      const backend = getBackend()
+      for (const run of created) {
+        await backend.saveRun(run)
+        applyRun(run, backend)
+      }
       setImportText('')
       setImportError('')
       notify(`${created.length}개 결과를 가져왔습니다.`)

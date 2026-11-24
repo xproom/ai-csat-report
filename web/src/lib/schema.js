@@ -118,7 +118,7 @@ export function createPaper(overrides = {}) {
 
 /** @brief 표지·목록에 쓰는 평가지 제목 */
 export function paperTitle(paper) {
-  const { meta } = paper
+  const meta = paper?.meta ?? {}
   const form = formTypeOf(meta)
   if (meta.title?.trim()) return meta.title.trim()
   const level = SCHOOL_NAMES[meta.schoolLevel] ?? '중학교'
