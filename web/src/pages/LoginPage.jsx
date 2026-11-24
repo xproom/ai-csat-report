@@ -1,19 +1,30 @@
 /**
  * @file LoginPage.jsx
- * @brief 로그인 화면 - 이메일 로그인 링크(또는 인증번호), Google 로그인, 로그인 없이 둘러보기
+ * @brief 첫 화면 - 로그인 / 가입 신청, Google 로그인, 로그인 없이 둘러보기
  *
- * - 처음 로그인하는 교사는 계정이 만들어지고 '승인 대기' 화면으로 넘어감 (관리자 승인 후 사용)
- * - 메일의 링크를 이 컴퓨터의 브라우저에서 열면 로그인됨 (다른 탭에서 열어도 이 화면이 자동으로 넘어감)
- * - 메일 서버(SMTP)를 연결해 메일에 6자리 번호를 넣으면 번호 입력으로도 로그인 가능
+ * - 가입 신청: 이름·학교·과목·이메일을 적고 메일의 인증번호를 확인하면 신청됨 → 관리자 승인 후 이용
+ * - 로그인: 가입된 이메일로 인증번호를 받아 입력 (메일의 버튼을 눌러도 로그인됨)
+ * - 인증번호를 기다리는 중에 화면을 새로 열어도 입력칸이 그대로 나옴 (1시간)
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { localDb } from '@/lib/db'
 import { loadDemo } from '@/lib/demo'
-import { describeCloudError, loginProviders, sendLoginCode, setGuest, signInWithGoogle, verifyLoginCode } from '@/lib/cloud'
+import { describeCloudError, getPendingLogin, loginProviders, sendLoginCode, setGuest, setPendingLogin, signInWithGoogle, verifyLoginCode } from '@/lib/cloud'
 import { useStore } from '@/lib/store'
 
 const RESEND_SECONDS = 60
+const SIGNUP_FIELDS = [['name', '이름', '홍길동'], ['school', '학교', '○○고등학교'], ['subject', '담당 과목', '수학']]
+const EMPTY_SIGNUP = { name: '', school: '', subject: '' }
+
+/** @brief 만료된 링크로 돌아온 주소(#error=...)의 안내 (아니면 빈 문자열) */
+function linkError() {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  if (!params.get('error')) return ''
+  return /expired|invalid/i.test(`${params.get('error_code')} ${params.get('error_description')}`)
+    ? '로그인 링크가 만료됐거나 이미 사용됐습니다. 인증번호를 다시 받아 주세요.'
+    : '로그인하지 못했습니다. 다시 시도해 주세요.'
+}
 
 function OmrMark() {
   return (
@@ -27,23 +38,23 @@ function OmrMark() {
 
 export default function LoginPage() {
   const { notify, refresh, setGuestMode } = useStore()
-  const [email, setEmail] = useState('')
+  // 인증번호를 기다리던 중이면 그 화면부터
+  const [pending] = useState(getPendingLogin)
+  const [mode, setMode] = useState(pending?.signup ? 'signup' : 'login')
+  const [email, setEmail] = useState(pending?.email ?? '')
+  const [signup, setSignup] = useState(pending?.signup ?? EMPTY_SIGNUP)
   const [code, setCode] = useState('')
-  const [step, setStep] = useState('email') // email → code
+  const [step, setStep] = useState(pending ? 'code' : 'email') // email → code
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(linkError)
   const [google, setGoogle] = useState(false)
   const [wait, setWait] = useState(0)
   const codeRef = useRef(null)
 
   useEffect(() => { loginProviders().then(providers => setGoogle(providers.google)) }, [])
-  // 만료된 링크로 돌아온 경우 (#error=...&error_description=...)
+  // 안내를 읽어 둔 뒤 주소에서 오류 표시를 지움
   useEffect(() => {
-    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-    if (!params.get('error')) return
-    const expired = /expired|invalid/i.test(`${params.get('error_code')} ${params.get('error_description')}`)
-    setError(expired ? '로그인 링크가 만료됐거나 이미 사용됐습니다. 새 링크를 받아 주세요.' : '로그인하지 못했습니다. 다시 시도해 주세요.')
-    window.history.replaceState(null, '', `${window.location.pathname}#/`)
+    if (/error=/.test(window.location.hash)) window.history.replaceState(null, '', `${window.location.pathname}#/`)
   }, [])
   useEffect(() => {
     if (!wait) return undefined
@@ -52,20 +63,27 @@ export default function LoginPage() {
   }, [wait])
   useEffect(() => { if (step === 'code') codeRef.current?.focus() }, [step])
 
+  const signupData = () => (mode === 'signup' ? { name: signup.name.trim(), school: signup.school.trim(), subject: signup.subject.trim() } : null)
+
   const send = async event => {
     event?.preventDefault()
     setError('')
     setBusy(true)
     try {
-      await sendLoginCode(email)
+      await sendLoginCode(email, signupData())
+      setPendingLogin({ email: email.trim(), signup: signupData() })
       setStep('code')
       setWait(RESEND_SECONDS)
     } catch (err) {
-      setError(/rate limit|security purposes/i.test(err?.message ?? '') ? '잠시 뒤 다시 요청해 주세요. (메일은 짧은 시간에 여러 번 보낼 수 없습니다)' : describeCloudError(err))
+      setError(err?.message || '메일을 보내지 못했습니다.')
     } finally {
       setBusy(false)
     }
   }
+
+  const changeMode = next => { setPendingLogin(null); setMode(next); setStep('email'); setCode(''); setError('') }
+  const backToEmail = () => { setPendingLogin(null); setStep('email'); setCode(''); setError('') }
+  const haveCode = () => { setPendingLogin({ email: email.trim(), signup: null }); setStep('code'); setError('') }
 
   const verify = async event => {
     event.preventDefault()
@@ -134,45 +152,58 @@ export default function LoginPage() {
           </div>
 
           <div className="card p-6 sm:p-8">
-            <h2 className="text-2xl font-extrabold tracking-tight">로그인</h2>
-            <p className="mt-1 text-sm text-[var(--color-ink-soft)] break-keep">교사 이메일로 로그인하세요. 처음이면 가입 신청 후 관리자 승인을 받아 이용합니다.</p>
+            <div className="segmented mb-5 w-full [&>button]:flex-1" role="group" aria-label="로그인 또는 가입 신청">
+              <button type="button" aria-pressed={mode === 'login'} onClick={() => changeMode('login')}>로그인</button>
+              <button type="button" aria-pressed={mode === 'signup'} onClick={() => changeMode('signup')}>가입 신청</button>
+            </div>
+            <h2 className="text-2xl font-extrabold tracking-tight">{mode === 'login' ? '로그인' : '가입 신청'}</h2>
+            <p className="mt-1 text-sm text-[var(--color-ink-soft)] break-keep">
+              {mode === 'login'
+                ? '가입한 이메일로 인증번호를 받아 로그인합니다. 한 번 로그인하면 이 브라우저에서 로그인이 유지됩니다.'
+                : '정보를 적고 이메일을 확인하면 신청됩니다. 관리자가 승인하면 이용할 수 있습니다.'}
+            </p>
 
             {step === 'email' ? (
-              <form className="mt-6 space-y-3" onSubmit={send}>
+              <form className="mt-5 space-y-3" onSubmit={send}>
+                {mode === 'signup' && SIGNUP_FIELDS.map(([key, label, placeholder]) => (
+                  <label key={key} className="block">
+                    <span className="field-label">{label}</span>
+                    <input className="input" required maxLength={60} value={signup[key]} placeholder={placeholder} onChange={e => setSignup(prev => ({ ...prev, [key]: e.target.value }))} />
+                  </label>
+                ))}
                 <label className="block">
                   <span className="field-label">이메일</span>
                   <input className="input" type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="teacher@school.kr" />
                 </label>
-                <button type="submit" className="btn btn-primary w-full !py-3" disabled={busy}>{busy ? '보내는 중…' : '로그인 메일 받기'}</button>
+                <button type="submit" className="btn btn-primary w-full !py-3" disabled={busy}>{busy ? '보내는 중…' : mode === 'login' ? '인증번호 받기' : '가입 신청하고 인증번호 받기'}</button>
+                {mode === 'login' && (
+                  <button type="button" className="w-full text-sm font-semibold text-[var(--color-brand)] hover:underline disabled:opacity-50 disabled:no-underline" disabled={!email.trim()} onClick={haveCode}>
+                    이미 받은 인증번호 입력하기
+                  </button>
+                )}
               </form>
             ) : (
-              <form className="mt-6 space-y-3" onSubmit={verify}>
-                <div className="rounded-xl bg-[var(--color-brand-soft)] px-4 py-3 text-sm leading-relaxed break-keep">
-                  <b>{email}</b>로 로그인 메일을 보냈습니다.
-                  <ol className="mt-2 list-decimal pl-5 space-y-0.5">
-                    <li>이 컴퓨터에서 메일함을 열고 <b>Supabase Auth</b>가 보낸 메일을 찾으세요.</li>
-                    <li>메일의 <b>「Log In」</b> (처음이면 <b>「Confirm email address」</b>) 링크를 누르세요.</li>
-                    <li>로그인되면 이 화면이 자동으로 넘어갑니다.</li>
-                  </ol>
-                  <p className="mt-2 text-xs text-[var(--color-ink-soft)]">메일이 안 보이면 스팸함을 확인하세요. 휴대폰에서 링크를 누르면 휴대폰에서 로그인됩니다.</p>
-                </div>
+              <form className="mt-5 space-y-3" onSubmit={verify}>
+                <p className="rounded-xl bg-[var(--color-brand-soft)] px-4 py-3 text-sm leading-relaxed break-keep">
+                  <b className="break-all">{email}</b>로 온 <b>「AI 검증 평가 서비스」</b> 메일의 인증번호를 입력하세요. 휴대폰에서 메일을 봐도 됩니다.
+                  <span className="mt-1 block text-xs text-[var(--color-ink-soft)]">메일의 버튼을 누르면 버튼을 누른 브라우저에서 로그인됩니다. 메일이 안 보이면 스팸함을 확인하세요.</span>
+                </p>
                 <label className="block">
-                  <span className="field-label">메일에 6자리 인증번호가 있으면 입력 (없으면 링크를 누르세요)</span>
+                  <span className="field-label">인증번호</span>
                   <input
                     ref={codeRef}
-                    className="input text-center text-2xl font-extrabold tracking-[0.5em] tabular-nums"
+                    className="input text-center text-2xl font-extrabold tracking-[0.4em] tabular-nums"
                     inputMode="numeric"
                     autoComplete="one-time-code"
-                    maxLength={8}
+                    maxLength={10}
                     required
                     value={code}
                     onChange={e => setCode(e.target.value.replace(/[^0-9]/g, ''))}
-                    placeholder="••••••"
                   />
                 </label>
-                <button type="submit" className="btn btn-primary w-full !py-3" disabled={busy || code.length < 6}>{busy ? '확인 중…' : '로그인'}</button>
-                <div className="flex items-center justify-between text-sm">
-                  <button type="button" className="font-semibold text-[var(--color-ink-soft)] hover:underline" onClick={() => { setStep('email'); setCode(''); setError('') }}>← 이메일 바꾸기</button>
+                <button type="submit" className="btn btn-primary w-full !py-3" disabled={busy || code.length < 6}>{busy ? '확인 중…' : mode === 'login' ? '로그인' : '이메일 확인하고 신청 마치기'}</button>
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <button type="button" className="font-semibold text-[var(--color-ink-soft)] hover:underline" onClick={backToEmail}>← 이메일 바꾸기</button>
                   <button type="button" className="font-semibold text-[var(--color-brand)] hover:underline disabled:opacity-50 disabled:no-underline" disabled={wait > 0 || busy} onClick={send}>
                     {wait > 0 ? `다시 보내기 (${wait}초)` : '인증번호 다시 보내기'}
                   </button>
@@ -180,7 +211,12 @@ export default function LoginPage() {
               </form>
             )}
 
-            {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-[var(--color-pen)]">{error}</p>}
+            {error && (
+              <div role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-[var(--color-pen)] break-keep">
+                {error}
+                {mode === 'login' && /가입 신청/.test(error) && <button type="button" className="ml-2 font-bold underline" onClick={() => changeMode('signup')}>가입 신청하기</button>}
+              </div>
+            )}
 
             {google && (
               <>

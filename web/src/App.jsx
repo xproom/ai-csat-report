@@ -25,7 +25,7 @@ function Routes() {
   if (cloud.configured && !cloud.guest) {
     if (!cloud.ready) return <p className="min-h-dvh grid place-items-center text-[var(--color-ink-soft)]">불러오는 중…</p>
     if (!cloud.user) return <LoginPage />
-    if (cloud.profile?.status !== 'approved') return <PendingPage />
+    if (cloud.profile?.status !== 'approved') return <PendingPage key={cloud.profile?.status ?? 'none'} />
   }
 
   let page

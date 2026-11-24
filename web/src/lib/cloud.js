@@ -66,33 +66,46 @@ function check({ data, error }) {
   return data
 }
 
-/** @brief 로그인 링크를 이메일로 보냄 (비밀번호 없이 링크를 눌러 로그인) */
-export async function sendLoginLink(email) {
-  const supabase = getSupabase()
-  if (!supabase) throw new Error('먼저 Supabase 연결 정보를 입력하세요.')
-  const redirectTo = `${window.location.origin}${window.location.pathname}`
-  check(await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: redirectTo } }))
-}
-
 export async function signOut() {
   await getSupabase()?.auth.signOut()
 }
 
-/* ───────────── 로그인 (이메일 6자리 인증번호 · Google) ───────────── */
+/* ───────────── 로그인 (이메일 인증번호 · Google) ───────────── */
 
 const siteUrl = () => `${window.location.origin}${window.location.pathname}`
 
 /**
- * @brief 로그인 인증번호(6자리)를 이메일로 보냄 - 메일의 링크를 눌러도 로그인됨
- * - 처음 쓰는 이메일이면 계정이 만들어지고 '승인 대기' 상태가 됨
+ * @brief 인증번호를 이메일로 보냄 - 메일의 버튼을 눌러도 로그인됨
+ * @param {string} email
+ * @param {{ name, school, subject }|null} [signup] - 가입 신청이면 신청 정보. 없으면 로그인(가입된 이메일만)
  */
-export async function sendLoginCode(email) {
+export async function sendLoginCode(email, signup = null) {
   const supabase = getSupabase()
   if (!supabase) throw new Error('서버 연결 정보가 없습니다.')
-  check(await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: siteUrl(), shouldCreateUser: true } }))
+  const { error } = await supabase.auth.signInWithOtp({
+    email: email.trim(),
+    options: { emailRedirectTo: siteUrl(), shouldCreateUser: Boolean(signup), ...(signup ? { data: signup } : {}) }
+  })
+  if (!error) return
+  if (error.code === 'otp_disabled' || /signups not allowed/i.test(error.message)) throw new Error('가입되지 않은 이메일입니다. 「가입 신청」을 먼저 해 주세요.')
+  if (error.status === 429 || /rate limit|security purposes/i.test(error.message)) throw new Error('잠시 뒤 다시 요청해 주세요. (메일은 짧은 시간에 여러 번 보낼 수 없습니다)')
+  throw new Error(describeCloudError(error))
 }
 
-/** @brief 메일로 받은 6자리 인증번호로 로그인 */
+const PENDING_LOGIN_KEY = 'exam-bench.pendingLogin'
+const PENDING_LOGIN_MS = 60 * 60 * 1000
+
+/** @brief 인증번호를 기다리는 중인 이메일·신청 정보 (메일을 보고 와서 화면을 새로 열어도 이어서 입력) */
+export function getPendingLogin() {
+  const pending = safe(() => JSON.parse(localStorage.getItem(PENDING_LOGIN_KEY) || 'null'))
+  return pending && Date.now() - pending.at < PENDING_LOGIN_MS ? pending : null
+}
+
+export function setPendingLogin(pending) {
+  safe(() => (pending ? localStorage.setItem(PENDING_LOGIN_KEY, JSON.stringify({ ...pending, at: Date.now() })) : localStorage.removeItem(PENDING_LOGIN_KEY)))
+}
+
+/** @brief 메일로 받은 인증번호로 로그인 */
 export async function verifyLoginCode(email, code) {
   const supabase = getSupabase()
   const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.replace(/\s+/g, ''), type: 'email' })
@@ -123,18 +136,48 @@ export async function loginProviders() {
 
 /* ───────────── 교사 프로필 · 관리자 승인 ───────────── */
 
-/** @brief 내 프로필 (없으면 승인 대기 행을 만듦) */
+const readProfile = async (supabase, userId) => check(await supabase.from('profiles').select('*').eq('id', userId).maybeSingle())
+
+/**
+ * @brief 내 프로필 (없으면 승인 대기 행을 만듦)
+ * - 첫 화면에서 적은 가입 신청 정보가 아직 프로필에 없으면 채워 넣음
+ *   (계정에 붙은 정보를 먼저 쓰므로 다른 기기에서 메일을 열어도 신청이 이어짐)
+ */
 export async function fetchMyProfile(supabase, user) {
-  const row = check(await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle())
-  if (row) return row
-  check(await supabase.from('profiles').insert({ id: user.id, email: user.email ?? '' }))
-  return check(await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle())
+  let profile = await readProfile(supabase, user.id)
+  if (!profile) {
+    check(await supabase.from('profiles').insert({ id: user.id, email: user.email ?? '' }))
+    profile = await readProfile(supabase, user.id)
+  }
+  if (profile && !profile.requested_at) {
+    const pending = getPendingLogin()
+    const info = signupInfo(user.user_metadata) ?? (pending?.email === user.email ? signupInfo(pending?.signup) : null)
+    if (info) {
+      check(await supabase.from('profiles').update({ ...info, requested_at: new Date().toISOString() }).eq('id', user.id))
+      profile = await readProfile(supabase, user.id)
+    }
+  }
+  return profile
 }
 
-/** @brief 가입 신청 정보 저장 (이름·학교·과목) - 권한·승인 상태는 서버가 바꾸지 못하게 막음 */
-export async function saveMyProfile(userId, { name, school, subject }) {
-  const supabase = getSupabase()
-  check(await supabase.from('profiles').update({ name: name.trim(), school: school.trim(), subject: subject.trim(), requested_at: new Date().toISOString(), status: 'pending' }).eq('id', userId))
+/** @brief 이름·학교·과목이 모두 있는 신청 정보만 (없으면 null) */
+function signupInfo(source) {
+  const info = {}
+  for (const key of ['name', 'school', 'subject']) {
+    info[key] = String(source?.[key] ?? '').trim()
+    if (!info[key]) return null
+  }
+  return info
+}
+
+/**
+ * @brief 내 정보 저장 (이름·학교·과목). 거절된 경우에만 다시 '승인 대기'로 신청
+ * - 승인된 사람(관리자 포함)이 정보를 고쳐도 승인 상태는 그대로
+ */
+export async function saveMyProfile(profile, { name, school, subject }) {
+  const patch = { name: name.trim(), school: school.trim(), subject: subject.trim(), requested_at: profile.requested_at ?? new Date().toISOString() }
+  if (profile.status === 'rejected') Object.assign(patch, { status: 'pending', requested_at: new Date().toISOString() })
+  check(await getSupabase().from('profiles').update(patch).eq('id', profile.id))
 }
 
 /** @brief (관리자) 모든 교사 프로필 */

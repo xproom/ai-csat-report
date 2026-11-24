@@ -4,9 +4,40 @@
  */
 
 import { useState } from 'react'
-import { createCloudDb, describeCloudError, getCloudConfig, getSupabase, setCloudConfig, setGuest, signOut, uploadLocalData } from '@/lib/cloud'
+import { createCloudDb, describeCloudError, getCloudConfig, getSupabase, saveMyProfile, setCloudConfig, setGuest, signOut, uploadLocalData } from '@/lib/cloud'
 import { localDb } from '@/lib/db'
 import { useStore } from '@/lib/store'
+
+/** @brief 내 정보(이름·학교·과목) 고치기 - 관리자의 사용자 관리 화면에 보임 */
+function MyInfo({ profile }) {
+  const { reloadProfile, notify } = useStore()
+  const [form, setForm] = useState({ name: profile.name ?? '', school: profile.school ?? '', subject: profile.subject ?? '' })
+  const [busy, setBusy] = useState(false)
+  const save = async event => {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      await saveMyProfile(profile, form)
+      await reloadProfile()
+      notify('내 정보를 저장했습니다.')
+    } catch (error) {
+      notify(describeCloudError(error), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_1fr_auto]" onSubmit={save}>
+      {[['name', '이름'], ['school', '학교'], ['subject', '담당 과목']].map(([key, label]) => (
+        <label key={key} className="block">
+          <span className="field-label">{label}</span>
+          <input className="input" required maxLength={60} value={form[key]} onChange={e => setForm(prev => ({ ...prev, [key]: e.target.value }))} />
+        </label>
+      ))}
+      <button type="submit" className="btn btn-ghost" disabled={busy}>{busy ? '저장 중…' : '내 정보 저장'}</button>
+    </form>
+  )
+}
 
 export default function CloudPanel() {
   const { cloud, refresh, notify, setGuestMode } = useStore()
@@ -84,6 +115,8 @@ export default function CloudPanel() {
           <button type="button" className="btn btn-primary" onClick={goLogin}>로그인하기</button>
         </div>
       )}
+
+      {cloud.user && cloud.profile && <MyInfo profile={cloud.profile} />}
 
       {cloud.user && (
         <div className="flex flex-wrap items-center gap-2">

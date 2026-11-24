@@ -2,7 +2,7 @@
  * @file store.jsx
  * @brief 앱 전역 데이터(평가지·풀이 기록), 중앙 서버 로그인·승인 상태, 해시 라우터, 알림
  *
- * cloud = { configured, ready, user, profile, guest }
+ * cloud = { configured, ready, user, profile, profileError, guest }
  * - configured: 서버 연결 정보가 있음 (있으면 로그인해야 쓸 수 있음)
  * - profile: 교사 프로필 { role: 'admin'|'teacher', status: 'pending'|'approved'|'rejected', ... }
  * - guest: 로그인 없이 체험 (이 브라우저에만 저장)
@@ -10,7 +10,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { createCloudDb, fetchMyProfile, getCloudConfig, getSupabase, isGuest } from './cloud'
+import { createCloudDb, fetchMyProfile, getCloudConfig, getSupabase, isGuest, setPendingLogin } from './cloud'
 import { db, setBackend } from './db'
 
 const StoreContext = createContext(null)
@@ -53,18 +53,22 @@ export function StoreProvider({ children }) {
       }
       userIdRef.current = user?.id ?? null
       let profile = null
+      let profileError = ''
       if (user) {
         try {
           profile = await fetchMyProfile(supabase, user)
+          setPendingLogin(null)
         } catch (err) {
-          setError(err?.message || '교사 정보를 불러오지 못했습니다.')
+          profileError = err?.message || '교사 정보를 불러오지 못했습니다.'
         }
+        // 프로필을 읽는 사이 로그아웃했거나 다른 계정으로 바뀌었으면 이 결과는 버림
+        if (userIdRef.current !== user.id) return
       }
       const approved = profile?.status === 'approved'
       setBackend(user && approved ? createCloudDb(supabase, user.id) : null)
       // 로그인 링크로 돌아온 주소(#access_token=...)는 첫 화면 주소로 정리
       if (user && /access_token|refresh_token/.test(window.location.hash)) window.history.replaceState(null, '', `${window.location.pathname}#/`)
-      setCloud(prev => ({ ...prev, configured: true, user, profile, ready: true }))
+      setCloud(prev => ({ ...prev, configured: true, user, profile, profileError, ready: true }))
       setLoading(true)
       refresh()
     }
@@ -93,8 +97,9 @@ export function StoreProvider({ children }) {
     const profile = await fetchMyProfile(supabase, user)
     const approved = profile?.status === 'approved'
     setBackend(approved ? createCloudDb(supabase, user.id) : null)
-    setCloud(prev => ({ ...prev, profile }))
+    setCloud(prev => ({ ...prev, profile, profileError: '' }))
     if (approved) refresh()
+    return profile
   }, [refresh])
 
   const setGuestMode = useCallback(on => setCloud(prev => ({ ...prev, guest: on })), [])
