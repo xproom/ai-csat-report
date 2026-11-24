@@ -46,7 +46,7 @@ export function describeApiError(error) {
   if (!status) {
     return { status, fatal: true, message: `Anthropic API에 연결하지 못했습니다. 인터넷 연결, 회사·학교 방화벽, 광고 차단 같은 브라우저 확장 프로그램이 api.anthropic.com 요청을 막는지 확인하세요. (${raw})` }
   }
-  if (status === 401) return { status, fatal: true, message: `API 키가 올바르지 않습니다(401). 설정에서 키를 다시 확인하세요. (${raw})` }
+  if (status === 401) return { status, fatal: true, message: `API 키가 올바르지 않습니다(401). API 키를 다시 확인하세요. (${raw})` }
   if (status === 403) return { status, fatal: true, message: `이 API 키로는 요청이 허용되지 않습니다(403). 키의 권한이나 워크스페이스 설정을 확인하세요. (${raw})` }
   if (status === 404) return { status, fatal: true, message: `모델을 찾을 수 없습니다(404). 이 계정에서 선택한 모델을 쓸 수 있는지 확인하고 다른 모델로 시도해 보세요. (${raw})` }
   if (status === 413) return { status, fatal: true, message: `요청이 너무 큽니다(413). 문제지 파일이 한 요청 한도(32MB)를 넘습니다. 해당 과목 쪽만 남긴 PDF로 다시 올려 주세요. (${raw})` }
@@ -122,7 +122,7 @@ async function fileToBlock(file) {
  * @returns {Promise<Object>} 풀이 기록(Run)
  */
 export async function runClaudeOnPaper({ apiKey, model, effort = 'high', paper, files, signal }) {
-  if (!apiKey) throw new Error('설정에서 Anthropic API 키를 먼저 입력하세요.')
+  if (!apiKey) throw new Error('Anthropic API 키를 먼저 입력하세요.')
   if (!files?.length) throw new Error('문제지 파일이 없습니다. 먼저 문제지를 업로드하세요.')
   if (estimateRequestBytes(files) > MAX_REQUEST_BYTES) {
     throw new Error('문제지 파일이 너무 큽니다. 한 요청 한도(32MB)를 넘으니, 해당 과목 쪽만 남긴 PDF나 사진으로 다시 올려 주세요.')
@@ -225,7 +225,7 @@ const KEY_READER_PROMPT = `첨부한 자료는 학교 시험의 정답표(답안
  * @returns {Promise<string>} answerKey.parseAnswerKey에 넣을 JSON 텍스트
  */
 export async function readAnswerKeyWithClaude({ apiKey, model = CLAUDE_MODELS[0].id, paper, file, signal }) {
-  if (!apiKey) throw new Error('정답표 사진·PDF를 읽으려면 설정에서 Anthropic API 키를 입력하세요.')
+  if (!apiKey) throw new Error('정답표 사진·PDF를 읽으려면 Anthropic API 키를 입력하세요.')
   const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
   const block = await fileToBlock(file)
   const { text } = await callClaude({
@@ -429,7 +429,7 @@ const VERIFY_PROMPT = `당신은 학교 시험 문제지를 검토하는 교사�
  * @returns {Promise<Object>} facts { source:'ai', pages, anchors, questions, defaultPoints, notes }
  */
 export async function verifyPaperWithClaude({ apiKey, model = CLAUDE_MODELS[0].id, paper, files, signal, expectedCount = 0, pageHint = '', onProgress }) {
-  if (!apiKey) throw new Error('AI 정밀 검증을 하려면 설정에서 Anthropic API 키를 입력하세요.')
+  if (!apiKey) throw new Error('AI 정밀 검증을 하려면 Anthropic API 키를 입력하세요.')
   if (!files.length) throw new Error('검증할 문제지 파일이 없습니다.')
   const modelInfo = CLAUDE_MODELS.find(item => item.id === model) ?? CLAUDE_MODELS[0]
   onProgress?.({ phase: 'upload', done: 0, expected: expectedCount || paper.questions.length })

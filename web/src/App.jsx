@@ -10,6 +10,8 @@ import { StoreProvider, useRoute, useStore } from '@/lib/store'
 import HomePage from '@/pages/HomePage'
 import NewPaperPage from '@/pages/NewPaperPage'
 import PaperPage from '@/pages/PaperPage'
+import { canManage } from '@/lib/cloud'
+import AccountPage from '@/pages/AccountPage'
 import AdminPage from '@/pages/AdminPage'
 import DashboardPage from '@/pages/DashboardPage'
 import LoginPage from '@/pages/LoginPage'
@@ -36,7 +38,9 @@ function Routes() {
   else if (first === 'new') page = <NewPaperPage />
   else if (first === 'paper' && second) page = <PaperPage key={second} paperId={second} tab={route.query.get('tab') || 'cover'} runId={route.query.get('run')} edit={route.query.get('edit') === '1'} />
   else if (first === 'dashboard') page = <DashboardPage />
-  else if (first === 'settings') page = <SettingsPage />
+  // 설정은 관리자만: 교사가 설정 주소로 들어와도 내 계정을 보여 줌
+  else if (first === 'settings' && canManage(cloud)) page = <SettingsPage />
+  else if (first === 'settings' || first === 'account') page = <AccountPage />
   else if (first === 'admin') page = <AdminPage />
   else page = <HomePage />
 

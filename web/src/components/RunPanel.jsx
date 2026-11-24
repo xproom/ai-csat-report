@@ -115,7 +115,7 @@ export default function RunPanel({ paper, files }) {
         <div className="mt-4 space-y-4">
           {!apiKey && (
             <p className="rounded-lg bg-[var(--color-brand-soft)] px-3 py-2 text-sm">
-              Claude로 풀려면 <a href="#/settings" className="font-bold underline">설정</a>에서 본인의 Anthropic API 키를 입력하세요. 키는 이 브라우저에만 저장되고, 요청은 브라우저에서 Anthropic으로 바로 갑니다.
+              Claude로 풀려면 <a href="#/account" className="font-bold underline">API 키 입력 화면</a>에서 본인의 Anthropic API 키를 입력하세요. 키는 이 브라우저에만 저장되고, 요청은 브라우저에서 Anthropic으로 바로 갑니다.
             </p>
           )}
           {!files.length && <p className="text-sm text-[var(--color-pen)]">먼저 ‘문제지’ 탭에서 문제지 파일을 올려 주세요.</p>}

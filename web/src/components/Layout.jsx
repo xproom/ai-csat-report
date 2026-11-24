@@ -3,7 +3,7 @@
  * @brief 상단 헤더, 모바일 하단 탭, 알림 토스트
  */
 
-import { setGuest } from '@/lib/cloud'
+import { canManage, setGuest } from '@/lib/cloud'
 import { useStore } from '@/lib/store'
 
 const NAV = [
@@ -43,12 +43,16 @@ function isActive(current, path) {
   return current.startsWith(path)
 }
 
+const ACCOUNT_NAV = { path: '/account', label: '내 계정', icon: 'M16 8a4 4 0 11-8 0 4 4 0 018 0zM4 21a8 8 0 0116 0' }
 const ADMIN_NAV = { path: '/admin', label: '사용자 관리', icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a8 8 0 0116 0M19 8v6M22 11h-6' }
 
 export default function Layout({ route, children }) {
   const { toast, cloud, setGuestMode } = useStore()
   const current = route.path
-  const nav = cloud.profile?.role === 'admin' && !cloud.guest ? [...NAV.slice(0, 3), ADMIN_NAV, NAV[3]] : NAV
+  // 관리자: 사용자 관리·설정 / 교사: 내 계정 / 둘러보기: 둘 다 없음
+  const [settingsNav] = NAV.slice(-1)
+  const tail = canManage(cloud) ? (cloud.configured ? [ADMIN_NAV, settingsNav] : [settingsNav]) : cloud.guest ? [] : [ACCOUNT_NAV]
+  const nav = [...NAV.slice(0, -1), ...tail]
   const leaveGuest = () => { setGuest(false); setGuestMode(false) }
 
   return (

@@ -357,7 +357,7 @@ const LADDER_NOTE = {
  * @returns {Promise<Object>} 풀이 기록(Run) - trace, perQuestionMs 포함
  */
 export async function runLiveSolve({ apiKey, model, effort = 'medium', paper, files, signal, onEvent, onStatus, onPageMap }) {
-  if (!apiKey) throw new Error('설정에서 Anthropic API 키를 먼저 입력하세요.')
+  if (!apiKey) throw new Error('Anthropic API 키를 먼저 입력하세요.')
   if (!files?.length) throw new Error('문제지 파일이 없습니다. 먼저 문제지를 업로드하세요.')
   if (estimateRequestBytes(files) > MAX_REQUEST_BYTES) {
     throw new Error(`문제지 파일이 너무 큽니다(약 ${(estimateRequestBytes(files) / 1048576).toFixed(0)}MB로 전송). 한 요청 한도(32MB)를 넘으니, 해당 과목 쪽만 남긴 PDF나 사진으로 다시 올려 주세요.`)

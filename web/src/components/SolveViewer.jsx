@@ -338,7 +338,7 @@ export default function SolveViewer({ paper, runs, files, initialRunId }) {
           </div>
           <p className="mt-2 text-xs text-[var(--color-ink-soft)] leading-relaxed">
             문항마다 한 번씩 요청해 문항별 실제 시간을 잽니다. 문제지는 첫 요청 뒤 캐시되어 다음 문항부터 입력 비용이 크게 줄어듭니다.
-            {!apiKey && <> <a href="#/settings" className="font-bold underline">설정</a>에서 API 키를 먼저 입력하세요.</>}
+            {!apiKey && <> <a href="#/account" className="font-bold underline">API 키 입력 화면</a>에서 API 키를 먼저 입력하세요.</>}
             {apiKey && !files.length && <> 먼저 문제지 파일을 올려 주세요.</>}
           </p>
         </details>

@@ -221,6 +221,9 @@ export async function updateProfileByAdmin(id, patch, adminId) {
   check(await getSupabase().from('profiles').update(next).eq('id', id))
 }
 
+/** @brief 관리 메뉴(사용자 관리·설정)를 쓸 수 있는지 - 관리자만. 서버 없이 혼자 쓰는 경우는 설정을 열어 둠 */
+export const canManage = cloud => !cloud.configured || (!cloud.guest && cloud.profile?.role === 'admin' && cloud.profile.status === 'approved')
+
 /* ───────────── 로그인 없이 체험 (이 브라우저에만 저장) ───────────── */
 
 const GUEST_KEY = 'exam-bench.guest'
