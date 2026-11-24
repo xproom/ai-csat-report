@@ -2,19 +2,27 @@
  * @file LoginPage.jsx
  * @brief 첫 화면 - 로그인 / 가입 신청, Google 로그인, 로그인 없이 둘러보기
  *
- * - 가입 신청: 이름·학교·과목·이메일을 적고 메일의 인증번호를 확인하면 신청됨 → 관리자 승인 후 이용
- * - 로그인: 가입된 이메일로 인증번호를 받아 입력 (메일의 버튼을 눌러도 로그인됨)
+ * - 가입 신청: 이름·학교·과목·이메일·비밀번호를 적고 메일의 인증번호를 확인하면 신청됨 → 관리자 승인 후 이용
+ * - 로그인: 이메일과 비밀번호. 비밀번호가 없거나 잊었으면 인증번호로 확인하고 새로 정함 (인증번호만으로 로그인도 가능)
  * - 인증번호를 기다리는 중에 화면을 새로 열어도 입력칸이 그대로 나옴 (1시간)
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { NewPasswordFields, PasswordInput } from '@/components/PasswordFields'
 import { localDb } from '@/lib/db'
 import { loadDemo } from '@/lib/demo'
-import { describeCloudError, getPendingLogin, loginProviders, sendLoginCode, setGuest, setPendingLogin, signInWithGoogle, verifyLoginCode } from '@/lib/cloud'
+import { changePassword, cleanEmail, describeCloudError, getPendingLogin, loginProviders, resendSignupCode, sendLoginCode, setGuest, setNeedPassword, setPendingLogin, signInWithGoogle, signInWithPassword, signUpWithPassword, verifyLoginCode } from '@/lib/cloud'
+import { passwordProblem } from '@/lib/password'
 import { useStore } from '@/lib/store'
 
 const RESEND_SECONDS = 60
 const SIGNUP_FIELDS = [['name', '이름', '홍길동'], ['school', '학교', '○○고등학교'], ['subject', '담당 과목', '수학']]
+const MODES = {
+  login: { title: '로그인', help: '가입한 이메일과 비밀번호로 로그인합니다. 한 번 로그인하면 이 브라우저에서 유지됩니다.', submit: '로그인' },
+  code: { title: '인증번호로 로그인', help: '가입한 이메일로 인증번호를 보냅니다.', submit: '인증번호 받기', verify: '로그인' },
+  reset: { title: '비밀번호 정하기·재설정', help: '이메일로 인증번호를 확인한 뒤 새 비밀번호를 정합니다.', submit: '인증번호 받기', verify: '확인하고 비밀번호 정하기' },
+  signup: { title: '가입 신청', help: '정보를 적고 이메일을 확인하면 신청됩니다. 관리자가 승인하면 이용할 수 있습니다.', submit: '가입 신청하고 인증번호 받기', verify: '이메일 확인하고 신청 마치기' }
+}
 const EMPTY_SIGNUP = { name: '', school: '', subject: '' }
 
 /** @brief 만료된 링크로 돌아온 주소(#error=...)의 안내 (아니면 빈 문자열) */
@@ -38,18 +46,21 @@ function OmrMark() {
 
 export default function LoginPage() {
   const { notify, refresh, setGuestMode } = useStore()
-  // 인증번호를 기다리던 중이면 그 화면부터
+  // 인증번호를 기다리던 중이면 그 화면부터 (비밀번호는 어디에도 저장하지 않음)
   const [pending] = useState(getPendingLogin)
-  const [mode, setMode] = useState(pending?.signup ? 'signup' : 'login')
+  const [mode, setMode] = useState(pending?.kind ?? 'login') // login(비밀번호) | code(인증번호) | reset(비밀번호 정하기) | signup
   const [email, setEmail] = useState(pending?.email ?? '')
   const [signup, setSignup] = useState(pending?.signup ?? EMPTY_SIGNUP)
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [code, setCode] = useState('')
-  const [step, setStep] = useState(pending ? 'code' : 'email') // email → code
+  const [step, setStep] = useState(pending ? 'code' : 'form') // form → code
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(linkError)
   const [google, setGoogle] = useState(false)
   const [wait, setWait] = useState(0)
   const codeRef = useRef(null)
+  const text = MODES[mode] ?? MODES.login
 
   useEffect(() => { loginProviders().then(providers => setGoogle(providers.google)) }, [])
   // 안내를 읽어 둔 뒤 주소에서 오류 표시를 지움
@@ -64,15 +75,48 @@ export default function LoginPage() {
   useEffect(() => { if (step === 'code') codeRef.current?.focus() }, [step])
 
   const signupData = () => (mode === 'signup' ? { name: signup.name.trim(), school: signup.school.trim(), subject: signup.subject.trim() } : null)
+  const waitForCode = kind => {
+    setPendingLogin({ email: cleanEmail(email), signup: signupData(), kind })
+    if (kind === 'reset') setNeedPassword(cleanEmail(email))
+    setMode(kind)
+    setStep('code')
+  }
 
-  const send = async event => {
-    event?.preventDefault()
+  const submit = async event => {
+    event.preventDefault()
+    const problem = mode === 'signup' ? passwordProblem(password, confirm) : ''
+    setError(problem)
+    if (problem) return
+    setBusy(true)
+    try {
+      if (mode === 'login') {
+        await signInWithPassword(email, password)
+        return // 로그인되면 앱이 자동으로 다음 화면으로 넘어감
+      }
+      if (mode === 'signup') {
+        if (await signUpWithPassword(email, password, signupData())) return
+      } else {
+        await sendLoginCode(email)
+      }
+      waitForCode(mode)
+      setWait(RESEND_SECONDS)
+    } catch (err) {
+      if (err?.code === 'email_not_confirmed') {
+        // 가입은 했지만 메일 확인이 남은 경우 → 인증번호 입력으로
+        waitForCode('signup')
+        setWait(0)
+      }
+      setError(err?.message || '처리하지 못했습니다.')
+    }
+    setBusy(false)
+  }
+
+  const resend = async () => {
     setError('')
     setBusy(true)
     try {
-      await sendLoginCode(email, signupData())
-      setPendingLogin({ email: email.trim(), signup: signupData() })
-      setStep('code')
+      if (mode === 'signup') await resendSignupCode(email)
+      else await sendLoginCode(email)
       setWait(RESEND_SECONDS)
     } catch (err) {
       setError(err?.message || '메일을 보내지 못했습니다.')
@@ -81,9 +125,16 @@ export default function LoginPage() {
     }
   }
 
-  const changeMode = next => { setPendingLogin(null); setMode(next); setStep('email'); setCode(''); setError('') }
-  const backToEmail = () => { setPendingLogin(null); setStep('email'); setCode(''); setError('') }
-  const haveCode = () => { setPendingLogin({ email: email.trim(), signup: null }); setStep('code'); setError('') }
+  const changeMode = next => {
+    setPendingLogin(null)
+    setNeedPassword('')
+    setMode(next)
+    setStep('form')
+    setCode('')
+    setPassword('')
+    setConfirm('')
+    setError('')
+  }
 
   const verify = async event => {
     event.preventDefault()
@@ -91,7 +142,8 @@ export default function LoginPage() {
     setBusy(true)
     try {
       await verifyLoginCode(email, code)
-      // 로그인되면 앱이 자동으로 다음 화면(승인 대기 또는 서비스)으로 넘어감
+      // 같은 이메일로 먼저 신청된 적이 있어도, 메일을 확인한 사람이 방금 정한 비밀번호가 쓰이게 함
+      if (mode === 'signup' && password) await changePassword(password).catch(() => {})
     } catch (err) {
       setError(err?.message || '로그인하지 못했습니다.')
       setBusy(false)
@@ -153,18 +205,14 @@ export default function LoginPage() {
 
           <div className="card p-6 sm:p-8">
             <div className="segmented mb-5 w-full [&>button]:flex-1" role="group" aria-label="로그인 또는 가입 신청">
-              <button type="button" aria-pressed={mode === 'login'} onClick={() => changeMode('login')}>로그인</button>
+              <button type="button" aria-pressed={mode !== 'signup'} onClick={() => changeMode('login')}>로그인</button>
               <button type="button" aria-pressed={mode === 'signup'} onClick={() => changeMode('signup')}>가입 신청</button>
             </div>
-            <h2 className="text-2xl font-extrabold tracking-tight">{mode === 'login' ? '로그인' : '가입 신청'}</h2>
-            <p className="mt-1 text-sm text-[var(--color-ink-soft)] break-keep">
-              {mode === 'login'
-                ? '가입한 이메일로 인증번호를 받아 로그인합니다. 한 번 로그인하면 이 브라우저에서 로그인이 유지됩니다.'
-                : '정보를 적고 이메일을 확인하면 신청됩니다. 관리자가 승인하면 이용할 수 있습니다.'}
-            </p>
+            <h2 className="text-2xl font-extrabold tracking-tight">{text.title}</h2>
+            <p className="mt-1 text-sm text-[var(--color-ink-soft)] break-keep">{text.help}</p>
 
-            {step === 'email' ? (
-              <form className="mt-5 space-y-3" onSubmit={send}>
+            {step === 'form' ? (
+              <form key={mode} className="mt-5 space-y-3" onSubmit={submit}>
                 {mode === 'signup' && SIGNUP_FIELDS.map(([key, label, placeholder]) => (
                   <label key={key} className="block">
                     <span className="field-label">{label}</span>
@@ -173,13 +221,22 @@ export default function LoginPage() {
                 ))}
                 <label className="block">
                   <span className="field-label">이메일</span>
-                  <input className="input" type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="teacher@school.kr" />
+                  <input className="input" type="email" required autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="teacher@school.kr" />
                 </label>
-                <button type="submit" className="btn btn-primary w-full !py-3" disabled={busy}>{busy ? '보내는 중…' : mode === 'login' ? '인증번호 받기' : '가입 신청하고 인증번호 받기'}</button>
+                {mode === 'login' && <PasswordInput label="비밀번호" value={password} onChange={setPassword} autoComplete="current-password" />}
+                {mode === 'signup' && <NewPasswordFields value={password} confirm={confirm} onChange={setPassword} onConfirm={setConfirm} />}
+                <button type="submit" className="btn btn-primary w-full !py-3" disabled={busy}>{busy ? '처리 중…' : text.submit}</button>
                 {mode === 'login' && (
-                  <button type="button" className="w-full text-sm font-semibold text-[var(--color-brand)] hover:underline disabled:opacity-50 disabled:no-underline" disabled={!email.trim()} onClick={haveCode}>
-                    이미 받은 인증번호 입력하기
-                  </button>
+                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-2 text-sm font-semibold">
+                    <button type="button" className="text-[var(--color-brand)] hover:underline" onClick={() => changeMode('reset')}>비밀번호 정하기·재설정</button>
+                    <button type="button" className="text-[var(--color-ink-soft)] hover:underline" onClick={() => changeMode('code')}>인증번호로 로그인</button>
+                  </div>
+                )}
+                {(mode === 'code' || mode === 'reset') && (
+                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-2 text-sm font-semibold">
+                    <button type="button" className="text-[var(--color-ink-soft)] hover:underline" onClick={() => changeMode('login')}>← 비밀번호로 로그인</button>
+                    <button type="button" className="text-[var(--color-brand)] hover:underline disabled:opacity-50 disabled:no-underline" disabled={!email.trim()} onClick={() => { setError(''); waitForCode(mode) }}>이미 받은 인증번호 입력</button>
+                  </div>
                 )}
               </form>
             ) : (
@@ -201,10 +258,10 @@ export default function LoginPage() {
                     onChange={e => setCode(e.target.value.replace(/[^0-9]/g, ''))}
                   />
                 </label>
-                <button type="submit" className="btn btn-primary w-full !py-3" disabled={busy || code.length < 6}>{busy ? '확인 중…' : mode === 'login' ? '로그인' : '이메일 확인하고 신청 마치기'}</button>
+                <button type="submit" className="btn btn-primary w-full !py-3" disabled={busy || code.length < 6}>{busy ? '확인 중…' : text.verify}</button>
                 <div className="flex items-center justify-between gap-3 text-sm">
-                  <button type="button" className="font-semibold text-[var(--color-ink-soft)] hover:underline" onClick={backToEmail}>← 이메일 바꾸기</button>
-                  <button type="button" className="font-semibold text-[var(--color-brand)] hover:underline disabled:opacity-50 disabled:no-underline" disabled={wait > 0 || busy} onClick={send}>
+                  <button type="button" className="font-semibold text-[var(--color-ink-soft)] hover:underline" onClick={() => changeMode(mode)}>← 이메일 바꾸기</button>
+                  <button type="button" className="font-semibold text-[var(--color-brand)] hover:underline disabled:opacity-50 disabled:no-underline" disabled={wait > 0 || busy} onClick={resend}>
                     {wait > 0 ? `다시 보내기 (${wait}초)` : '인증번호 다시 보내기'}
                   </button>
                 </div>
@@ -214,7 +271,7 @@ export default function LoginPage() {
             {error && (
               <div role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-[var(--color-pen)] break-keep">
                 {error}
-                {mode === 'login' && /가입 신청/.test(error) && <button type="button" className="ml-2 font-bold underline" onClick={() => changeMode('signup')}>가입 신청하기</button>}
+                {mode !== 'signup' && /「가입 신청」/.test(error) && <button type="button" className="ml-2 font-bold underline" onClick={() => changeMode('signup')}>가입 신청하기</button>}
               </div>
             )}
 

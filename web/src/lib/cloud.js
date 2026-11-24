@@ -9,6 +9,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { authErrorMessage } from './password.js'
 
 const CONFIG_KEY = 'exam-bench.supabase'
 const BUCKET = 'paper-files'
@@ -70,27 +71,60 @@ export async function signOut() {
   await getSupabase()?.auth.signOut()
 }
 
-/* ───────────── 로그인 (이메일 인증번호 · Google) ───────────── */
+/* ───────────── 로그인 (비밀번호 · 이메일 인증번호 · Google) ───────────── */
 
 const siteUrl = () => `${window.location.origin}${window.location.pathname}`
 
-/**
- * @brief 인증번호를 이메일로 보냄 - 메일의 버튼을 눌러도 로그인됨
- * @param {string} email
- * @param {{ name, school, subject }|null} [signup] - 가입 신청이면 신청 정보. 없으면 로그인(가입된 이메일만)
- */
-export async function sendLoginCode(email, signup = null) {
+export const cleanEmail = email => email.trim().toLowerCase()
+
+/** @brief 로그인 요청 결과 확인 - 실패하면 한국어 안내와 오류 코드를 담아 던짐 */
+function checkAuth({ data, error }) {
+  if (!error) return data
+  throw Object.assign(new Error(authErrorMessage(error) || describeCloudError(error)), { code: error.code })
+}
+
+function requireClient() {
   const supabase = getSupabase()
   if (!supabase) throw new Error('서버 연결 정보가 없습니다.')
-  const { error } = await supabase.auth.signInWithOtp({
-    email: email.trim(),
-    options: { emailRedirectTo: siteUrl(), shouldCreateUser: Boolean(signup), ...(signup ? { data: signup } : {}) }
-  })
-  if (!error) return
-  if (error.code === 'otp_disabled' || /signups not allowed/i.test(error.message)) throw new Error('가입되지 않은 이메일입니다. 「가입 신청」을 먼저 해 주세요.')
-  if (error.status === 429 || /rate limit|security purposes/i.test(error.message)) throw new Error('잠시 뒤 다시 요청해 주세요. (메일은 짧은 시간에 여러 번 보낼 수 없습니다)')
-  throw new Error(describeCloudError(error))
+  return supabase
 }
+
+/** @brief 이메일·비밀번호로 로그인 */
+export async function signInWithPassword(email, password) {
+  checkAuth(await requireClient().auth.signInWithPassword({ email: cleanEmail(email), password }))
+  setNeedPassword('')
+}
+
+/**
+ * @brief 비밀번호로 가입 신청 (메일의 인증번호를 확인해야 로그인됨)
+ * @returns {Promise<boolean>} 메일 확인 없이 바로 로그인됐으면 true
+ */
+export async function signUpWithPassword(email, password, info) {
+  const data = checkAuth(await requireClient().auth.signUp({ email: cleanEmail(email), password, options: { data: info, emailRedirectTo: siteUrl() } }))
+  // 이미 가입된 이메일이면 서버가 오류 대신 빈 identities를 돌려줌 (메일도 보내지 않음)
+  if (data.user && data.user.identities?.length === 0) throw new Error(authErrorMessage({ code: 'user_already_exists' }))
+  return Boolean(data.session)
+}
+
+/** @brief 가입 확인 인증번호 다시 보내기 */
+export async function resendSignupCode(email) {
+  checkAuth(await requireClient().auth.resend({ type: 'signup', email: cleanEmail(email), options: { emailRedirectTo: siteUrl() } }))
+}
+
+/** @brief 로그인한 사람의 비밀번호 정하기·바꾸기 */
+export async function changePassword(password) {
+  checkAuth(await requireClient().auth.updateUser({ password }))
+}
+
+/** @brief 가입된 이메일로 인증번호를 보냄 - 메일의 버튼을 눌러도 로그인됨 */
+export async function sendLoginCode(email) {
+  checkAuth(await requireClient().auth.signInWithOtp({ email: cleanEmail(email), options: { emailRedirectTo: siteUrl(), shouldCreateUser: false } }))
+}
+
+const NEED_PASSWORD_KEY = 'exam-bench.needPassword'
+/** @brief 「비밀번호 정하기·재설정」 중인 이메일 (로그인되면 새 비밀번호 화면을 보여 줌) */
+export const getNeedPassword = () => safe(() => localStorage.getItem(NEED_PASSWORD_KEY) || '', '')
+export const setNeedPassword = email => safe(() => (email ? localStorage.setItem(NEED_PASSWORD_KEY, email) : localStorage.removeItem(NEED_PASSWORD_KEY)))
 
 const PENDING_LOGIN_KEY = 'exam-bench.pendingLogin'
 const PENDING_LOGIN_MS = 60 * 60 * 1000
@@ -107,12 +141,7 @@ export function setPendingLogin(pending) {
 
 /** @brief 메일로 받은 인증번호로 로그인 */
 export async function verifyLoginCode(email, code) {
-  const supabase = getSupabase()
-  const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.replace(/\s+/g, ''), type: 'email' })
-  if (error) {
-    if (/expired|invalid/i.test(error.message)) throw new Error('인증번호가 맞지 않거나 시간이 지났습니다. 새 인증번호를 받아 다시 입력하세요.')
-    throw new Error(describeCloudError(error))
-  }
+  checkAuth(await requireClient().auth.verifyOtp({ email: cleanEmail(email), token: code.replace(/\s+/g, ''), type: 'email' }))
 }
 
 /** @brief Google 계정으로 로그인 (Supabase에서 Google 로그인을 켜 둔 경우만) */

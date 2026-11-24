@@ -2,7 +2,7 @@
  * @file store.jsx
  * @brief 앱 전역 데이터(평가지·풀이 기록), 중앙 서버 로그인·승인 상태, 해시 라우터, 알림
  *
- * cloud = { configured, ready, user, profile, profileError, guest }
+ * cloud = { configured, ready, user, profile, profileError, needPassword, guest }
  * - configured: 서버 연결 정보가 있음 (있으면 로그인해야 쓸 수 있음)
  * - profile: 교사 프로필 { role: 'admin'|'teacher', status: 'pending'|'approved'|'rejected', ... }
  * - guest: 로그인 없이 체험 (이 브라우저에만 저장)
@@ -10,7 +10,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { createCloudDb, fetchMyProfile, getCloudConfig, getSupabase, isGuest, setPendingLogin } from './cloud'
+import { createCloudDb, fetchMyProfile, getCloudConfig, getNeedPassword, getSupabase, isGuest, setNeedPassword, setPendingLogin } from './cloud'
 import { db, setBackend } from './db'
 
 const StoreContext = createContext(null)
@@ -68,7 +68,7 @@ export function StoreProvider({ children }) {
       setBackend(user && approved ? createCloudDb(supabase, user.id) : null)
       // 로그인 링크로 돌아온 주소(#access_token=...)는 첫 화면 주소로 정리
       if (user && /access_token|refresh_token/.test(window.location.hash)) window.history.replaceState(null, '', `${window.location.pathname}#/`)
-      setCloud(prev => ({ ...prev, configured: true, user, profile, profileError, ready: true }))
+      setCloud(prev => ({ ...prev, configured: true, user, profile, profileError, needPassword: Boolean(user) && getNeedPassword() === user.email, ready: true }))
       setLoading(true)
       refresh()
     }
@@ -102,9 +102,15 @@ export function StoreProvider({ children }) {
     return profile
   }, [refresh])
 
+  /** @brief 새 비밀번호를 정했거나 나중으로 미룸 */
+  const finishPassword = useCallback(() => {
+    setNeedPassword('')
+    setCloud(prev => ({ ...prev, needPassword: false }))
+  }, [])
+
   const setGuestMode = useCallback(on => setCloud(prev => ({ ...prev, guest: on })), [])
 
-  const value = useMemo(() => ({ papers, runs, loading, error, refresh, notify, toast, cloud, reloadProfile, setGuestMode }), [papers, runs, loading, error, refresh, notify, toast, cloud, reloadProfile, setGuestMode])
+  const value = useMemo(() => ({ papers, runs, loading, error, refresh, notify, toast, cloud, reloadProfile, finishPassword, setGuestMode }), [papers, runs, loading, error, refresh, notify, toast, cloud, reloadProfile, finishPassword, setGuestMode])
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
 

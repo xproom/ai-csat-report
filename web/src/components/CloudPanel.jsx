@@ -4,8 +4,10 @@
  */
 
 import { useState } from 'react'
-import { createCloudDb, describeCloudError, getCloudConfig, getSupabase, saveMyProfile, setCloudConfig, setGuest, signOut, uploadLocalData } from '@/lib/cloud'
+import { NewPasswordFields } from '@/components/PasswordFields'
+import { changePassword, createCloudDb, describeCloudError, getCloudConfig, getSupabase, saveMyProfile, setCloudConfig, setGuest, signOut, uploadLocalData } from '@/lib/cloud'
 import { localDb } from '@/lib/db'
+import { passwordProblem } from '@/lib/password'
 import { useStore } from '@/lib/store'
 
 /** @brief 내 정보(이름·학교·과목) 고치기 - 관리자의 사용자 관리 화면에 보임 */
@@ -36,6 +38,43 @@ function MyInfo({ profile }) {
       ))}
       <button type="submit" className="btn btn-ghost" disabled={busy}>{busy ? '저장 중…' : '내 정보 저장'}</button>
     </form>
+  )
+}
+
+/** @brief 비밀번호 정하기·바꾸기 */
+function PasswordForm({ email }) {
+  const { notify } = useStore()
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const save = async event => {
+    event.preventDefault()
+    const problem = passwordProblem(password, confirm)
+    setError(problem)
+    if (problem) return
+    setBusy(true)
+    try {
+      await changePassword(password)
+      setPassword('')
+      setConfirm('')
+      notify('비밀번호를 저장했습니다.')
+    } catch (err) {
+      setError(err?.message || '비밀번호를 저장하지 못했습니다.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <details className="rounded-xl border border-[var(--color-line)] px-4 py-3">
+      <summary className="cursor-pointer text-sm font-bold">비밀번호 정하기·바꾸기</summary>
+      <form className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]" onSubmit={save}>
+        <input type="email" className="hidden" autoComplete="username" value={email} readOnly />
+        <NewPasswordFields value={password} confirm={confirm} onChange={setPassword} onConfirm={setConfirm} />
+        <button type="submit" className="btn btn-ghost" disabled={busy}>{busy ? '저장 중…' : '저장'}</button>
+      </form>
+      {error && <p role="alert" className="mt-2 text-sm text-[var(--color-pen)] break-keep">{error}</p>}
+    </details>
   )
 }
 
@@ -117,6 +156,7 @@ export default function CloudPanel() {
       )}
 
       {cloud.user && cloud.profile && <MyInfo profile={cloud.profile} />}
+      {cloud.user && <PasswordForm email={cloud.user.email} />}
 
       {cloud.user && (
         <div className="flex flex-wrap items-center gap-2">

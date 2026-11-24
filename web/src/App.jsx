@@ -14,6 +14,7 @@ import AdminPage from '@/pages/AdminPage'
 import DashboardPage from '@/pages/DashboardPage'
 import LoginPage from '@/pages/LoginPage'
 import PendingPage from '@/pages/PendingPage'
+import SetPasswordPage from '@/pages/SetPasswordPage'
 import SettingsPage from '@/pages/SettingsPage'
 
 function Routes() {
@@ -25,6 +26,7 @@ function Routes() {
   if (cloud.configured && !cloud.guest) {
     if (!cloud.ready) return <p className="min-h-dvh grid place-items-center text-[var(--color-ink-soft)]">불러오는 중…</p>
     if (!cloud.user) return <LoginPage />
+    if (cloud.needPassword) return <SetPasswordPage />
     if (cloud.profile?.status !== 'approved') return <PendingPage key={cloud.profile?.status ?? 'none'} />
   }
 
