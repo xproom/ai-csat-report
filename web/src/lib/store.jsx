@@ -86,6 +86,9 @@ export function StoreProvider({ children }) {
         setCloud(prev => ({ ...prev, user }))
         return
       }
+      // 처음 열 때(undefined) 이미 로그인돼 있으면 보던 화면을 그대로 두고,
+      // 로그인·로그아웃을 하면 평가지 목록(첫 화면)부터 시작
+      if (userIdRef.current !== undefined) navigate('/')
       userIdRef.current = user?.id ?? null
       // 앞 계정의 자료가 잠깐이라도 보이지 않게 비움 (진행 중이던 읽기도 무효)
       refreshRef.current += 1

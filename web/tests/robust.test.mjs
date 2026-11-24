@@ -172,3 +172,37 @@ test('서버 목록: 1000건이 넘어도 모두 읽고, 같은 파일은 동시
   await Promise.all([cloud.listFiles('p'), cloud.listFiles('p')])
   assert.equal(server.calls.filter(call => call === 'download').length, 1)
 })
+
+test('둘러보기 자료: 한 번만 넣고, 새 버전이면 바꾸고, 자료가 없으면 알려 줌', async () => {
+  const { loadSample } = await import('../src/lib/demo.js')
+  const papers = new Map([['old', { id: 'old', isDemo: true }], ['mine', { id: 'mine' }]])
+  const files = new Map()
+  const runs = new Map()
+  const store = {
+    listPapers: async () => [...papers.values()],
+    savePaper: async item => { papers.set(item.id, item) },
+    saveFile: async item => { files.set(item.id, item) },
+    saveRun: async item => { runs.set(item.id, item) },
+    deletePaper: async id => { papers.delete(id) }
+  }
+  let version = 'a'
+  let broken = false
+  const sample = () => ({ version, paper: { id: 's', meta: {}, questions: [] }, runs: [{ id: 'r', answers: {} }], files: [{ id: 'f', type: 'application/pdf', url: 'p.pdf' }, { id: 'x', type: 'text/html', url: 'x.html' }] })
+  const request = async url => (String(url).endsWith('sample.json') ? new Response(JSON.stringify(sample())) : new Response('%PDF', { status: broken ? 500 : 200 }))
+  assert.equal(await loadSample(store, async () => new Response('<html>')), true, '자료 파일이 없으면 있던 예시를 씀')
+  broken = true
+  await assert.rejects(loadSample(store, request))
+  assert.ok(papers.has('old') && !papers.has('s'), '도중에 끊기면 아무것도 바꾸지 않음')
+  broken = false
+  assert.equal(await loadSample(store, request), true)
+  assert.deepEqual([...papers.keys()], ['mine', 's'])
+  assert.deepEqual([...files.keys()], ['f'], '허용한 형식만')
+  papers.set('s', { ...papers.get('s'), edited: true })
+  await loadSample(store, request)
+  assert.ok(papers.get('s').edited, '둘러보며 바꾼 내용은 남음')
+  version = 'b'
+  await loadSample(store, request)
+  assert.ok(!papers.get('s').edited)
+  papers.clear()
+  assert.equal(await loadSample(store, async () => { throw new Error('끊김') }), false)
+})

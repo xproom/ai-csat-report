@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react'
 import PaperCover from '@/components/PaperCover'
 import { Icon } from '@/components/Layout'
-import { loadDemo } from '@/lib/demo'
+import { loadDemo, loadSample } from '@/lib/demo'
 import { gradeRun } from '@/lib/grading'
 import { EXAM_TYPES, SCHOOL_LEVELS, paperTitle } from '@/lib/schema'
 import { useStore } from '@/lib/store'
@@ -45,6 +45,16 @@ export default function HomePage() {
     const latest = [...paperRuns].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]
     return [paper.id, { verify, counts: checkCounts(verify), latest: latest ? { model: latest.model, ...gradeRun(paper, latest) } : null }]
   })), [papers, runs])
+
+  /** @brief 예시 불러오기 (둘러보기에서는 실제 평가지, 로그인했으면 가상 평가지) */
+  const addDemo = async () => {
+    try {
+      if (cloud.guest && await loadSample()) await refresh()
+      else await loadDemo(refresh, notify)
+    } catch (error) {
+      notify(error?.message || '예시를 불러오지 못했습니다.', 'error')
+    }
+  }
 
   return (
     <div className="space-y-10">
@@ -111,9 +121,9 @@ export default function HomePage() {
             <p className="mt-1 text-[var(--color-ink-soft)]">새 평가지를 만들거나, 예시 데이터로 화면을 먼저 둘러보세요.</p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <a href="#/new" className="btn btn-primary">새 평가지 만들기</a>
-              <button type="button" className="btn btn-ghost" onClick={() => loadDemo(refresh, notify)}>예시 데이터 불러오기</button>
+              <button type="button" className="btn btn-ghost" onClick={addDemo}>예시 데이터 불러오기</button>
             </div>
-            <p className="mt-3 text-xs text-[var(--color-ink-soft)]">예시 데이터의 AI 풀이는 둘러보기용 가상 값입니다.</p>
+            {!cloud.guest && <p className="mt-3 text-xs text-[var(--color-ink-soft)]">예시 데이터의 AI 풀이는 둘러보기용 가상 값입니다.</p>}
           </div>
         ) : filtered.length === 0 ? (
           <p className="py-10 text-center text-[var(--color-ink-soft)]">조건에 맞는 평가지가 없습니다.</p>

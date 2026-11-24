@@ -9,11 +9,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { NewPasswordFields, PasswordInput } from '@/components/PasswordFields'
-import { localDb } from '@/lib/db'
-import { loadDemo } from '@/lib/demo'
+import { loadDemo, loadSample } from '@/lib/demo'
 import { changePassword, cleanEmail, describeCloudError, getPendingLogin, loginProviders, resendSignupCode, sendLoginCode, setGuest, setNeedPassword, setPendingLogin, signInWithGoogle, signInWithPassword, signUpWithPassword, verifyLoginCode } from '@/lib/cloud'
 import { passwordProblem } from '@/lib/password'
-import { useStore } from '@/lib/store'
+import { navigate, useStore } from '@/lib/store'
 
 const RESEND_SECONDS = 60
 const SIGNUP_FIELDS = [['name', '이름', '홍길동'], ['school', '학교', '○○고등학교'], ['subject', '담당 과목', '수학']]
@@ -160,12 +159,21 @@ export default function LoginPage() {
   }
 
   const tryWithoutLogin = async () => {
-    setGuest(true)
-    setGuestMode(true)
-    // 예시 평가지가 없을 때만 넣음 (여러 번 둘러봐도 겹치지 않게)
-    const existing = await localDb.listPapers()
-    if (!existing.some(paper => paper.isDemo)) await loadDemo(refresh, notify)
-    else await refresh()
+    setError('')
+    setBusy(true)
+    try {
+      const ready = await loadSample()
+      setGuest(true)
+      navigate('/')
+      // 실제 평가지를 준비하지 못했으면 가상 평가지로
+      if (ready) await refresh()
+      else await loadDemo(refresh, notify)
+      setGuestMode(true)
+    } catch (err) {
+      setGuest(false)
+      setError(err?.message || '둘러보기 자료를 불러오지 못했습니다.')
+      setBusy(false)
+    }
   }
 
   return (
@@ -287,8 +295,8 @@ export default function LoginPage() {
           </div>
 
           <div className="mt-5 text-center">
-            <button type="button" className="text-sm font-semibold text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] hover:underline" onClick={tryWithoutLogin}>
-              로그인 없이 예시로 둘러보기 →
+            <button type="button" disabled={busy} className="text-sm font-semibold text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] hover:underline" onClick={tryWithoutLogin}>
+              {busy ? '준비 중…' : '로그인 없이 예시로 둘러보기 →'}
             </button>
             <p className="mt-1 text-xs text-[var(--color-ink-soft)]">둘러보기 자료는 이 브라우저에만 저장되고 서버에는 올라가지 않습니다.</p>
           </div>

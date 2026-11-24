@@ -4,7 +4,8 @@
  * @note 예시 모델의 답은 무작위로 만든 가상 데이터입니다(isDemo: true). 실제 AI 성능이 아닙니다.
  */
 
-import { db } from './db.js'
+import { db, localDb } from './db.js'
+import { FILE_TYPES } from './files.js'
 import { createPaper, makeId, buildQuestions } from './schema.js'
 
 /** @brief 재현 가능한 의사난수 */
@@ -83,6 +84,39 @@ export function buildDemoData() {
   papers[2].cover.theme = 'burgundy'
   const runs = papers.flatMap((paper, index) => demoRuns(paper, 100 + index * 17))
   return { papers, runs }
+}
+
+/** 로그인 없이 둘러보기에서 쓰는 실제 평가지 (scripts/make-demo.mjs로 만듦) */
+const SAMPLE_URL = `${import.meta.env?.BASE_URL ?? '/'}demo/sample.json`
+
+/**
+ * @brief 둘러보기 자료 불러오기 - 평가지·문제지·AI 풀이를 이 브라우저에만 저장
+ * - 이미 있으면 그대로 두어, 둘러보며 바꾼 내용이 남음 (자료가 새 버전이면 다시 받음)
+ * - 예전 둘러보기 자료(가상 평가지)는 지움
+ * @returns {Promise<boolean>} 둘러보기 자료를 쓸 수 있으면 true
+ */
+export async function loadSample(store = localDb, request = fetch) {
+  const existing = await store.listPapers()
+  const response = await request(SAMPLE_URL).catch(() => null)
+  // 자료 파일이 없으면 첫 화면(HTML)이 올 수 있으므로 형식까지 확인
+  const sample = response?.ok ? await response.json().catch(() => null) : null
+  if (!sample?.paper?.id) return existing.some(paper => paper.isDemo)
+  const { paper, runs = [], files = [] } = sample
+  const had = existing.find(item => item.id === paper.id)
+  if (had?.sampleVersion === sample.version) return true
+
+  // 문제지를 모두 받은 뒤에 저장 (도중에 끊겨도 반쪽 자료가 남지 않게)
+  const records = await Promise.all(files.filter(file => FILE_TYPES.includes(file.type)).map(async file => {
+    const reply = await request(new URL(file.url, new URL(SAMPLE_URL, globalThis.location?.href ?? 'http://localhost/')).href)
+    if (!reply.ok) throw new Error('둘러보기 문제지를 받지 못했습니다.')
+    const { url: _url, ...rest } = file
+    return { ...rest, paperId: paper.id, blob: new Blob([await reply.blob()], { type: file.type }) }
+  }))
+  for (const old of existing) if (old.isDemo) await store.deletePaper(old.id)
+  for (const record of records) await store.saveFile(record)
+  for (const run of runs) await store.saveRun({ ...run, paperId: paper.id })
+  await store.savePaper({ ...paper, isDemo: true, sampleVersion: sample.version })
+  return true
 }
 
 /** @brief 예시 데이터를 저장소에 넣고 화면 갱신 */
