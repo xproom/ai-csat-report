@@ -376,9 +376,12 @@ export function createCloudDb(supabase, userId) {
 
     async exportAll() {
       const [papers, runs] = await Promise.all([api.listPapers(), api.listRuns()])
-      const files = (await Promise.all(papers.map(paper => api.listFiles(paper.id)))).flat()
+      // 문제지 하나를 받지 못해도 나머지는 백업 (몇 개가 빠졌는지 missingFiles로 알림)
+      const lists = await Promise.allSettled(papers.map(paper => api.listFiles(paper.id)))
+      const files = lists.flatMap(result => (result.status === 'fulfilled' ? result.value : []))
+      const missingFiles = lists.filter(result => result.status === 'rejected').length
       const encodedFiles = await Promise.all(files.map(async file => ({ ...file, blob: undefined, dataUrl: await blobToDataUrl(file.blob) })))
-      return { format: 'exam-bench-backup', version: 1, exportedAt: new Date().toISOString(), papers, runs, files: encodedFiles }
+      return { format: 'exam-bench-backup', version: 1, exportedAt: new Date().toISOString(), papers, runs, files: encodedFiles, ...(missingFiles ? { missingFiles } : {}) }
     },
     async importAll(backup) {
       if (backup?.format !== 'exam-bench-backup') throw new Error('이 서비스의 백업 파일이 아닙니다.')

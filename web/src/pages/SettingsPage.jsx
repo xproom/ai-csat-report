@@ -3,6 +3,7 @@
  * @brief (관리자) 중앙 서버(Supabase) 연결, API 키, 데이터 백업·복원·초기화, 예시 데이터
  */
 
+import { useEffect, useState } from 'react'
 import ApiKeySection from '@/components/ApiKeySection'
 import CloudPanel from '@/components/CloudPanel'
 import { db } from '@/lib/db'
@@ -13,15 +14,32 @@ export default function SettingsPage() {
   const { papers, runs, refresh, notify, cloud } = useStore()
   const demoPapers = papers.filter(paper => paper.isDemo)
 
+  const [exporting, setExporting] = useState(false)
+  // 자동으로 저장되지 않을 때 직접 누를 수 있는 저장 주소 { url, name }
+  const [download, setDownload] = useState(null)
+  useEffect(() => () => { if (download) URL.revokeObjectURL(download.url) }, [download])
+
   const exportBackup = async () => {
-    const backup = await db.exportAll()
-    const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `AI-검증-평가-백업-${new Date().toISOString().slice(0, 10)}.json`
-    link.click()
-    URL.revokeObjectURL(url)
+    setExporting(true)
+    try {
+      const backup = await db.exportAll()
+      const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const name = `AI-검증-평가-백업-${new Date().toLocaleDateString('sv-SE')}.json`
+      setDownload({ url, name, size: blob.size })
+      const link = document.createElement('a')
+      link.href = url
+      link.download = name
+      document.body.append(link)
+      link.click()
+      link.remove()
+      if (backup.missingFiles) notify(`평가지 ${backup.missingFiles}개의 문제지 파일은 받지 못해 빠졌습니다.`, 'error')
+      else notify(`백업 파일을 만들었습니다 (${(blob.size / 1024 / 1024).toFixed(1)}MB).`)
+    } catch (error) {
+      notify(`백업하지 못했습니다: ${error?.message || '알 수 없는 오류'}`, 'error')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const importBackup = async file => {
@@ -64,7 +82,8 @@ export default function SettingsPage() {
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">평가지 {papers.length}개 · 풀이 기록 {runs.length}개. 다른 기기로 옮기거나 보관하려면 백업 파일을 내려받으세요(문제지 파일 포함).</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn btn-primary" onClick={exportBackup} disabled={!papers.length}>백업 내려받기</button>
+          <button type="button" className="btn btn-primary" onClick={exportBackup} disabled={!papers.length || exporting}>{exporting ? '백업 만드는 중…' : '백업 내려받기'}</button>
+          {download && <a className="btn btn-ghost" href={download.url} download={download.name}>저장이 안 됐으면 여기를 누르세요</a>}
           <label className="btn btn-ghost">
             백업 파일로 복원
             <input type="file" accept="application/json,.json" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) importBackup(file); e.target.value = '' }} />
