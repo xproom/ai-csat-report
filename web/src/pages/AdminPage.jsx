@@ -1,6 +1,7 @@
 /**
  * @file AdminPage.jsx
- * @brief (관리자) 사용자 관리 - 가입 신청 승인·거절, 관리자 지정
+ * @brief (관리자) 사용자 관리 - 가입 신청 승인·거절, 관리자 지정 (관리자는 여러 명 둘 수 있음)
+ * - 자기 자신의 관리자 권한은 화면에서 거둘 수 없음 (관리자가 한 명도 남지 않는 실수 방지)
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -12,14 +13,17 @@ const STATUS = {
   approved: ['승인됨', 'bg-emerald-50 text-emerald-900 border-emerald-200'],
   rejected: ['거절됨', 'bg-red-50 text-[var(--color-pen)] border-red-200']
 }
-const FILTERS = [['pending', '승인 대기'], ['approved', '승인됨'], ['rejected', '거절됨'], ['all', '전체']]
+const FILTERS = [['pending', '승인 대기'], ['approved', '승인됨'], ['rejected', '거절됨'], ['admin', '관리자'], ['all', '전체']]
+
+const isAdminProfile = profile => profile.role === 'admin' && profile.status === 'approved'
 
 const when = value => (value ? new Date(value).toLocaleDateString('ko-KR') : '—')
 
 export default function AdminPage() {
   const { cloud, notify } = useStore()
   const [profiles, setProfiles] = useState(null)
-  const [filter, setFilter] = useState('pending')
+  // 고르기 전에는 승인 대기가 있으면 그것부터, 없으면 전체
+  const [picked, setPicked] = useState('')
   const [query, setQuery] = useState('')
   const [busyId, setBusyId] = useState('')
 
@@ -34,12 +38,23 @@ export default function AdminPage() {
   useEffect(() => { load() }, [load])
 
   const counts = useMemo(() => {
-    const result = { pending: 0, approved: 0, rejected: 0, all: profiles?.length ?? 0 }
-    for (const profile of profiles ?? []) result[profile.status] += 1
+    const result = { pending: 0, approved: 0, rejected: 0, admin: 0, all: profiles?.length ?? 0 }
+    for (const profile of profiles ?? []) {
+      result[profile.status] += 1
+      if (isAdminProfile(profile)) result.admin += 1
+    }
     return result
   }, [profiles])
-  const shown = (profiles ?? []).filter(profile => (filter === 'all' || profile.status === filter)
+  const filter = picked || (counts.pending ? 'pending' : 'all')
+  const shown = (profiles ?? []).filter(profile => (filter === 'all' || (filter === 'admin' ? isAdminProfile(profile) : profile.status === filter))
     && (!query.trim() || `${profile.email} ${profile.name} ${profile.school} ${profile.subject}`.includes(query.trim())))
+
+  const makeAdmin = profile => {
+    const name = profile.name || profile.email
+    if (!window.confirm(`${name} 님을 관리자로 지정할까요?
+관리자는 가입 승인·이용 중지와 다른 관리자 지정·해제를 할 수 있습니다.`)) return
+    change(profile, { role: 'admin' }, `${name} 님을 관리자로 지정했습니다.`)
+  }
 
   const change = async (profile, patch, message) => {
     if (profile.id === cloud.user.id && (patch.role === 'teacher' || patch.status === 'rejected')) {
@@ -67,17 +82,17 @@ export default function AdminPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">사용자 관리</h1>
-          <p className="mt-1 text-[var(--color-ink-soft)]">가입을 신청한 교사를 승인하면 서비스를 이용할 수 있습니다. 승인된 교사는 본인 자료만 봅니다.</p>
+          <p className="mt-1 text-[var(--color-ink-soft)]">가입을 신청한 교사를 승인하면 서비스를 이용할 수 있습니다. 승인된 교사는 본인 자료만 봅니다. 관리자는 여러 명 지정할 수 있습니다.</p>
         </div>
         <button type="button" className="btn btn-ghost" onClick={load}>새로고침</button>
       </div>
 
       <div className="card p-3 sm:p-4 flex flex-wrap items-center gap-2">
-        <div className="segmented" role="group" aria-label="상태">
+        <div className="scroll-x max-w-full"><div className="segmented min-w-max" role="group" aria-label="상태">
           {FILTERS.map(([key, label]) => (
-            <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)}>{label} {counts[key]}</button>
+            <button key={key} type="button" aria-pressed={filter === key} onClick={() => setPicked(key)}>{label} {counts[key]}</button>
           ))}
-        </div>
+        </div></div>
         <input className="input sm:!w-64 sm:ml-auto" value={query} onChange={e => setQuery(e.target.value)} placeholder="이름·이메일·학교 검색" aria-label="사용자 검색" />
       </div>
 
@@ -114,8 +129,8 @@ export default function AdminPage() {
                   {profile.status !== 'rejected' && !me && <button type="button" className="btn btn-danger !py-1.5 text-sm" disabled={busy} onClick={() => change(profile, { status: 'rejected' }, profile.status === 'approved' ? '이용을 중지했습니다.' : '신청을 거절했습니다.')}>{profile.status === 'approved' ? '이용 중지' : '거절'}</button>}
                   {profile.status === 'approved' && !me && (
                     profile.role === 'admin'
-                      ? <button type="button" className="btn btn-ghost !py-1.5 text-sm" disabled={busy} onClick={() => change(profile, { role: 'teacher' }, '관리자 권한을 거뒀습니다.')}>교사로 바꾸기</button>
-                      : <button type="button" className="btn btn-ghost !py-1.5 text-sm" disabled={busy} onClick={() => change(profile, { role: 'admin' }, '관리자로 지정했습니다.')}>관리자로 지정</button>
+                      ? <button type="button" className="btn btn-ghost !py-1.5 text-sm" disabled={busy} onClick={() => change(profile, { role: 'teacher' }, '관리자 권한을 거뒀습니다.')}>관리자 해제</button>
+                      : <button type="button" className="btn btn-ghost !py-1.5 text-sm" disabled={busy} onClick={() => makeAdmin(profile)}>관리자로 지정</button>
                   )}
                 </div>
               </li>
