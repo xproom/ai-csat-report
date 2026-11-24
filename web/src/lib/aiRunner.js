@@ -59,7 +59,7 @@ export function describeApiError(error) {
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 
-const ANSWER_SCHEMA = {
+export const ANSWER_SCHEMA = {
   type: 'object',
   properties: {
     answers: {
@@ -79,7 +79,7 @@ const ANSWER_SCHEMA = {
   additionalProperties: false
 }
 
-const SYSTEM_PROMPT = `당신은 한국 학교의 정기고사를 치르는 학생입니다. 첨부된 문제지의 모든 문항을 풀고, 문항 번호별 최종 답만 제출합니다.
+export const SYSTEM_PROMPT = `당신은 한국 학교의 정기고사를 치르는 학생입니다. 첨부된 문제지의 모든 문항을 풀고, 문항 번호별 최종 답만 제출합니다.
 답안 작성 규칙:
 - 객관식: 고른 선지 번호를 숫자 하나로 쓴다 (예: "3").
 - 단답형: 최종 답만 간단히 쓴다. 단위가 필요한 경우에만 붙인다.
@@ -87,7 +87,7 @@ const SYSTEM_PROMPT = `당신은 한국 학교의 정기고사를 치르는 학�
 - 풀 수 없는 문항도 가장 그럴듯한 답을 쓴다. 문제지에서 해당 번호를 찾을 수 없을 때만 빈 문자열을 쓴다.`
 
 /** @brief 문항 구성 안내문 (모델이 번호와 유형을 맞추도록) */
-function describeQuestions(paper) {
+export function describeQuestions(paper) {
   return paper.questions
     .map(question => {
       const type = QUESTION_TYPES[question.type]

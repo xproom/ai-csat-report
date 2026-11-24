@@ -1,13 +1,15 @@
 /**
  * @file RunPanel.jsx
- * @brief 풀이 기록 추가 - Claude로 풀기 / OMR 직접 입력 / 결과 JSON 가져오기
+ * @brief 풀이 기록 추가 - Claude·등록한 LLM으로 풀기 / OMR 직접 입력 / 결과 JSON 가져오기
  */
 
 import { useRef, useState } from 'react'
+import LlmModelPicker from '@/components/LlmModelPicker'
 import { CLAUDE_MODELS, EFFORT_LEVELS, importRuns, runClaudeOnPaper } from '@/lib/aiRunner'
 import { db } from '@/lib/db'
+import { runLlmOnPaper } from '@/lib/llmRunner'
 import { makeId, missingAnswers } from '@/lib/schema'
-import { getApiKey } from '@/lib/settings'
+import { getApiKey, getProviderKey } from '@/lib/settings'
 import { navigate, useStore } from '@/lib/store'
 
 const TABS = [
@@ -24,7 +26,9 @@ const IMPORT_EXAMPLE = `{
 export default function RunPanel({ paper, files }) {
   const { refresh, notify } = useStore()
   const [tab, setTab] = useState('ai')
-  const [selected, setSelected] = useState([CLAUDE_MODELS[0].id])
+  const [selected, setSelected] = useState(() => (getApiKey() ? [CLAUDE_MODELS[0].id] : []))
+  // Claude 외 LLM 모델 [{ id, providerId, model, label }]
+  const [others, setOthers] = useState([])
   const [effort, setEffort] = useState('high')
   const [progress, setProgress] = useState([])
   const [running, setRunning] = useState(false)
@@ -41,12 +45,16 @@ export default function RunPanel({ paper, files }) {
     const controller = new AbortController()
     abortRef.current = controller
     setRunning(true)
-    setProgress(selected.map(id => ({ id, label: CLAUDE_MODELS.find(model => model.id === id)?.label, state: 'waiting', message: '' })))
-    for (const id of selected) {
+    const jobs = [
+      ...(apiKey ? selected : []).map(id => ({ id, label: CLAUDE_MODELS.find(model => model.id === id)?.label, start: options => runClaudeOnPaper({ ...options, apiKey, model: id, effort }) })),
+      ...others.map(item => ({ id: item.id, label: item.label, start: options => runLlmOnPaper({ ...options, providerId: item.providerId, apiKey: getProviderKey(item.providerId), model: item.model }) }))
+    ]
+    setProgress(jobs.map(({ id, label }) => ({ id, label, state: 'waiting', message: '' })))
+    for (const { id, start } of jobs) {
       if (controller.signal.aborted) break
       setProgress(prev => prev.map(item => item.id === id ? { ...item, state: 'running' } : item))
       try {
-        const run = await runClaudeOnPaper({ apiKey, model: id, effort, paper, files, signal: controller.signal })
+        const run = await start({ paper, files, signal: controller.signal })
         await db.saveRun(run)
         const answered = Object.values(run.answers).filter(entry => entry.status === 'answered').length
         setProgress(prev => prev.map(item => item.id === id ? { ...item, state: 'done', message: `${answered}/${paper.questions.length}문항 답변 · ${(run.durationMs / 1000).toFixed(0)}초` } : item))
@@ -121,26 +129,27 @@ export default function RunPanel({ paper, files }) {
           {!files.length && <p className="text-sm text-[var(--color-pen)]">먼저 ‘문제지’ 탭에서 문제지 파일을 올려 주세요.</p>}
           <p className="text-sm">여기서는 문제지 전체를 한 번에 풉니다. AI가 문항을 하나씩 풀며 OMR에 마킹하는 과정을 실제 속도로 보려면 <a href={`#/paper/${paper.id}?tab=sim`} className="font-bold text-[var(--color-brand)] underline">AI 풀이</a> 탭에서 실시간으로 풀게 하세요.</p>
           <div>
-            <span className="field-label">풀이할 모델 (여러 개 선택 가능)</span>
+            <span className="field-label">Claude 모델 (여러 개 선택 가능)</span>
             <div className="flex flex-wrap gap-2">
               {CLAUDE_MODELS.map(model => (
                 <label key={model.id} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold cursor-pointer ${selected.includes(model.id) ? 'border-[var(--color-brand)] bg-[var(--color-brand-soft)]' : 'border-[var(--color-line)] bg-white'}`}>
-                  <input type="checkbox" checked={selected.includes(model.id)} onChange={() => toggleModel(model.id)} disabled={running} />
+                  <input type="checkbox" checked={selected.includes(model.id)} onChange={() => toggleModel(model.id)} disabled={running || !apiKey} />
                   {model.label}
                 </label>
               ))}
             </div>
           </div>
+          <LlmModelPicker selected={others} onChange={setOthers} disabled={running} />
           <div className="flex flex-wrap items-end gap-3">
             <label className="block">
-              <span className="field-label">추론 강도 (effort)</span>
+              <span className="field-label">추론 강도 (Claude만)</span>
               <select className="input !w-auto" value={effort} onChange={e => setEffort(e.target.value)} disabled={running}>
                 {EFFORT_LEVELS.map(level => <option key={level} value={level}>{level}</option>)}
               </select>
             </label>
             {running
               ? <button type="button" className="btn btn-danger" onClick={() => abortRef.current?.abort()}>중단</button>
-              : <button type="button" className="btn btn-primary" disabled={!apiKey || !files.length || !selected.length} onClick={runAll}>풀이 시작</button>}
+              : <button type="button" className="btn btn-primary" disabled={!files.length || !((apiKey && selected.length) || others.length)} onClick={runAll}>풀이 시작</button>}
             <span className="text-xs text-[var(--color-ink-soft)]">API 사용료는 입력한 키의 계정에 청구됩니다. 문제지 분량에 따라 모델당 수십 초~수 분 걸립니다.</span>
           </div>
           {progress.length > 0 && (
