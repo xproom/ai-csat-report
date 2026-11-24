@@ -93,17 +93,21 @@ const SAMPLE_URL = `${import.meta.env?.BASE_URL ?? '/'}demo/sample.json`
  * @brief 둘러보기 자료 불러오기 - 평가지·문제지·AI 풀이를 이 브라우저에만 저장
  * - 이미 있으면 그대로 두어, 둘러보며 바꾼 내용이 남음 (자료가 새 버전이면 다시 받음)
  * - 예전 둘러보기 자료(가상 평가지)는 지움
- * @returns {Promise<boolean>} 둘러보기 자료를 쓸 수 있으면 true
  */
 export async function loadSample(store = localDb, request = fetch) {
   const existing = await store.listPapers()
-  const response = await request(SAMPLE_URL).catch(() => null)
+  for (const old of existing) if (old.isDemo && !old.sampleVersion) await store.deletePaper(old.id)
+  const response = await request(SAMPLE_URL, { cache: 'no-cache' }).catch(() => null)
   // 자료 파일이 없으면 첫 화면(HTML)이 올 수 있으므로 형식까지 확인
   const sample = response?.ok ? await response.json().catch(() => null) : null
-  if (!sample?.paper?.id) return existing.some(paper => paper.isDemo)
+  if (!sample?.paper?.id) {
+    // 인터넷이 끊겨도 전에 받아 둔 자료가 있으면 그대로 씀
+    if (existing.some(paper => paper.sampleVersion)) return
+    throw new Error('둘러보기 자료를 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침해 주세요.')
+  }
   const { paper, runs = [], files = [] } = sample
   const had = existing.find(item => item.id === paper.id)
-  if (had?.sampleVersion === sample.version) return true
+  if (had?.sampleVersion === sample.version) return
 
   // 문제지를 모두 받은 뒤에 저장 (도중에 끊겨도 반쪽 자료가 남지 않게)
   const records = await Promise.all(files.filter(file => FILE_TYPES.includes(file.type)).map(async file => {
@@ -112,11 +116,10 @@ export async function loadSample(store = localDb, request = fetch) {
     const { url: _url, ...rest } = file
     return { ...rest, paperId: paper.id, blob: new Blob([await reply.blob()], { type: file.type }) }
   }))
-  for (const old of existing) if (old.isDemo) await store.deletePaper(old.id)
+  for (const old of existing) if (old.sampleVersion) await store.deletePaper(old.id)
   for (const record of records) await store.saveFile(record)
   for (const run of runs) await store.saveRun({ ...run, paperId: paper.id })
   await store.savePaper({ ...paper, isDemo: true, sampleVersion: sample.version })
-  return true
 }
 
 /** @brief 예시 데이터를 저장소에 넣고 화면 갱신 */

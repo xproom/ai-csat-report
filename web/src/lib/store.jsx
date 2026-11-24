@@ -12,6 +12,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createCloudDb, fetchMyProfile, getCloudConfig, getNeedPassword, getSupabase, isGuest, setNeedPassword, setPendingLogin } from './cloud'
 import { db, getBackend, setBackend } from './db'
+import { loadSample } from './demo'
 
 const StoreContext = createContext(null)
 
@@ -37,6 +38,8 @@ export function StoreProvider({ children }) {
   const refreshRef = useRef(0)
   // 새로 읽는 동안 저장한 것 (먼저 읽은 옛 내용에 덮이지 않게 다시 반영)
   const savedRef = useRef([])
+  // 둘러보기 자료를 준비하는 중 (준비되기 전에 예전 예시가 잠깐 보이지 않게)
+  const [sampling, setSampling] = useState(() => Boolean(getCloudConfig()) && isGuest())
   const refresh = useCallback(async () => {
     const ticket = refreshRef.current + 1
     refreshRef.current = ticket
@@ -152,9 +155,24 @@ export function StoreProvider({ children }) {
     setCloud(prev => ({ ...prev, needPassword: false }))
   }, [])
 
-  const setGuestMode = useCallback(on => setCloud(prev => ({ ...prev, guest: on })), [])
+  const setGuestMode = useCallback(on => {
+    setSampling(on)
+    setCloud(prev => ({ ...prev, guest: on }))
+  }, [])
 
-  const value = useMemo(() => ({ papers, runs, loading, error, refresh, applyPaper, applyRun, notify, toast, cloud, reloadProfile, finishPassword, setGuestMode }), [papers, runs, loading, error, refresh, applyPaper, applyRun, notify, toast, cloud, reloadProfile, finishPassword, setGuestMode])
+  // 둘러보기를 시작하거나, 둘러보던 창을 새로 열 때마다 최신 둘러보기 자료로 맞춤
+  const guest = cloud.configured && cloud.guest
+  useEffect(() => {
+    if (!guest) return undefined
+    let cancelled = false
+    loadSample()
+      .catch(err => notify(err?.message || '둘러보기 자료를 불러오지 못했습니다.', 'error'))
+      .then(refresh)
+      .finally(() => { if (!cancelled) setSampling(false) })
+    return () => { cancelled = true }
+  }, [guest, notify, refresh])
+
+  const value = useMemo(() => ({ papers, runs, loading: loading || sampling, error, refresh, applyPaper, applyRun, notify, toast, cloud, reloadProfile, finishPassword, setGuestMode }), [papers, runs, loading, sampling, error, refresh, applyPaper, applyRun, notify, toast, cloud, reloadProfile, finishPassword, setGuestMode])
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
 

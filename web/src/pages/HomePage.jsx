@@ -49,8 +49,12 @@ export default function HomePage() {
   /** @brief 예시 불러오기 (둘러보기에서는 실제 평가지, 로그인했으면 가상 평가지) */
   const addDemo = async () => {
     try {
-      if (cloud.guest && await loadSample()) await refresh()
-      else await loadDemo(refresh, notify)
+      if (!cloud.guest) {
+        await loadDemo(refresh, notify)
+        return
+      }
+      await loadSample()
+      await refresh()
     } catch (error) {
       notify(error?.message || '예시를 불러오지 못했습니다.', 'error')
     }

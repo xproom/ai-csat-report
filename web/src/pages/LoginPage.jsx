@@ -9,7 +9,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { NewPasswordFields, PasswordInput } from '@/components/PasswordFields'
-import { loadDemo, loadSample } from '@/lib/demo'
 import { changePassword, cleanEmail, describeCloudError, getPendingLogin, loginProviders, resendSignupCode, sendLoginCode, setGuest, setNeedPassword, setPendingLogin, signInWithGoogle, signInWithPassword, signUpWithPassword, verifyLoginCode } from '@/lib/cloud'
 import { passwordProblem } from '@/lib/password'
 import { navigate, useStore } from '@/lib/store'
@@ -44,7 +43,7 @@ function OmrMark() {
 }
 
 export default function LoginPage() {
-  const { notify, refresh, setGuestMode } = useStore()
+  const { setGuestMode } = useStore()
   // 인증번호를 기다리던 중이면 그 화면부터 (비밀번호는 어디에도 저장하지 않음)
   const [pending] = useState(getPendingLogin)
   const [mode, setMode] = useState(pending?.kind ?? 'login') // login(비밀번호) | code(인증번호) | reset(비밀번호 정하기) | signup
@@ -158,22 +157,11 @@ export default function LoginPage() {
     }
   }
 
-  const tryWithoutLogin = async () => {
-    setError('')
-    setBusy(true)
-    try {
-      const ready = await loadSample()
-      setGuest(true)
-      navigate('/')
-      // 실제 평가지를 준비하지 못했으면 가상 평가지로
-      if (ready) await refresh()
-      else await loadDemo(refresh, notify)
-      setGuestMode(true)
-    } catch (err) {
-      setGuest(false)
-      setError(err?.message || '둘러보기 자료를 불러오지 못했습니다.')
-      setBusy(false)
-    }
+  // 둘러보기 자료(수능 수학)는 store가 준비함
+  const tryWithoutLogin = () => {
+    setGuest(true)
+    navigate('/')
+    setGuestMode(true)
   }
 
   return (
@@ -296,7 +284,7 @@ export default function LoginPage() {
 
           <div className="mt-5 text-center">
             <button type="button" disabled={busy} className="text-sm font-semibold text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] hover:underline" onClick={tryWithoutLogin}>
-              {busy ? '준비 중…' : '로그인 없이 예시로 둘러보기 →'}
+              로그인 없이 예시로 둘러보기 →
             </button>
             <p className="mt-1 text-xs text-[var(--color-ink-soft)]">둘러보기 자료는 이 브라우저에만 저장되고 서버에는 올라가지 않습니다.</p>
           </div>

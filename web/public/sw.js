@@ -40,7 +40,8 @@ self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
   if (request.method !== 'GET' || url.origin !== self.location.origin || !url.pathname.startsWith(BASE_PATH)) return
-  const fromNetwork = () => fetch(request).then((response) => {
+  // 첫 화면 주소는 브라우저가 잠시 보관한 옛 판 대신 서버에 새 판이 있는지 꼭 확인
+  const fromNetwork = () => fetch(request, request.mode === 'navigate' ? { cache: 'no-cache' } : undefined).then((response) => {
     event.waitUntil(save(request, response.clone()).catch(() => {}))
     return response
   })
